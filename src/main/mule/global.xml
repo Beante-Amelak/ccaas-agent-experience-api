@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+	xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:secure-properties="http://www.mulesoft.org/schema/mule/secure-properties"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
+		http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd
+		http://www.mulesoft.org/schema/mule/secure-properties http://www.mulesoft.org/schema/mule/secure-properties/current/mule-secure-properties.xsd">
+
+	<!-- Global Properties -->
+	<global-property name="mule.env" value="dev" doc:name="Environment Property"/>
+	<global-property name="secure.key" value="mule-secure-key-123" doc:name="Secure Key"/>
+
+	<!-- Configuration Properties -->
+	<configuration-properties file="properties/application.yaml" doc:name="Common Properties"/>
+	<configuration-properties file="properties/application-${mule.env}.yaml" doc:name="Environment Properties"/>
+	
+	<!-- Secure Configuration Properties -->
+	<secure-properties:config name="Secure_Properties_Config" 
+		file="properties/secure.yaml" 
+		key="${secure.key}" 
+		doc:name="Secure Properties Config">
+		<secure-properties:encrypt algorithm="AES" mode="CBC"/>
+	</secure-properties:config>
+
+	<!-- Global Configuration with Default Error Handler Reference -->
+	<configuration doc:name="Configuration" defaultErrorHandler-ref="Global_Error_Handler"/>
+
+	<!-- APIKit Configuration -->
+	<apikit:config name="ccaas-interaction-process-api-config" 
+		api="api/ccaas-interaction-process-api.raml" 
+		outboundHeadersMapName="outboundHeaders" 
+		httpStatusVarName="httpStatus" 
+		doc:name="APIKit Config"/>
+
+	<!-- HTTP Listener Configuration -->
+	<http:listener-config name="HTTP_Listener_Config" 
+		basePath="${api.basePath}" 
+		doc:name="HTTP Listener Config">
+		<http:listener-connection 
+			host="${http.listener.host}" 
+			port="${http.listener.port}" 
+			usePersistentConnections="true" 
+			connectionIdleTimeout="${timeout.connectionIdle}"/>
+	</http:listener-config>
+
+	<!-- ============================================== -->
+	<!-- System API HTTP Request Configurations        -->
+	<!-- ============================================== -->
+
+	<!-- NICE CXOne System API -->
+	<http:request-config name="NICE_System_API_Config" 
+		basePath="${nice.api.basePath}" 
+		responseTimeout="${timeout.response}" 
+		doc:name="NICE System API Config">
+		<http:request-connection 
+			host="${nice.api.host}" 
+			port="${nice.api.port}" 
+			protocol="HTTPS" 
+			connectionIdleTimeout="${timeout.connectionIdle}">
+			<reconnection>
+				<reconnect frequency="${retry.intervalMs}" count="${retry.maxAttempts}"/>
+			</reconnection>
+		</http:request-connection>
+	</http:request-config>
+
+	<!-- CRM System API (Salesforce) -->
+	<http:request-config name="CRM_System_API_Config" 
+		basePath="${crm.api.basePath}" 
+		responseTimeout="${timeout.response}" 
+		doc:name="CRM System API Config">
+		<http:request-connection 
+			host="${crm.api.host}" 
+			port="${crm.api.port}" 
+			protocol="HTTPS" 
+			connectionIdleTimeout="${timeout.connectionIdle}">
+			<reconnection>
+				<reconnect frequency="${retry.intervalMs}" count="${retry.maxAttempts}"/>
+			</reconnection>
+		</http:request-connection>
+	</http:request-config>
+
+	<!-- Billing/Account System API -->
+	<http:request-config name="Billing_System_API_Config" 
+		basePath="${billing.api.basePath}" 
+		responseTimeout="${timeout.response}" 
+		doc:name="Billing System API Config">
+		<http:request-connection 
+			host="${billing.api.host}" 
+			port="${billing.api.port}" 
+			protocol="HTTPS" 
+			connectionIdleTimeout="${timeout.connectionIdle}">
+			<reconnection>
+				<reconnect frequency="${retry.intervalMs}" count="${retry.maxAttempts}"/>
+			</reconnection>
+		</http:request-connection>
+	</http:request-config>
+
+	<!-- WFM System API -->
+	<http:request-config name="WFM_System_API_Config" 
+		basePath="${wfm.api.basePath}" 
+		responseTimeout="${timeout.response}" 
+		doc:name="WFM System API Config">
+		<http:request-connection 
+			host="${wfm.api.host}" 
+			port="${wfm.api.port}" 
+			protocol="HTTPS" 
+			connectionIdleTimeout="${timeout.connectionIdle}">
+			<reconnection>
+				<reconnect frequency="${retry.intervalMs}" count="${retry.maxAttempts}"/>
+			</reconnection>
+		</http:request-connection>
+	</http:request-config>
+
+	<!-- Dialer System API -->
+	<http:request-config name="Dialer_System_API_Config" 
+		basePath="${dialer.api.basePath}" 
+		responseTimeout="${timeout.response}" 
+		doc:name="Dialer System API Config">
+		<http:request-connection 
+			host="${dialer.api.host}" 
+			port="${dialer.api.port}" 
+			protocol="HTTPS" 
+			connectionIdleTimeout="${timeout.connectionIdle}">
+			<reconnection>
+				<reconnect frequency="${retry.intervalMs}" count="${retry.maxAttempts}"/>
+			</reconnection>
+		</http:request-connection>
+	</http:request-config>
+
+	<!-- Recording & Compliance System API -->
+	<http:request-config name="Recording_System_API_Config" 
+		basePath="${recording.api.basePath}" 
+		responseTimeout="${timeout.response}" 
+		doc:name="Recording System API Config">
+		<http:request-connection 
+			host="${recording.api.host}" 
+			port="${recording.api.port}" 
+			protocol="HTTPS" 
+			connectionIdleTimeout="${timeout.connectionIdle}">
+			<reconnection>
+				<reconnect frequency="${retry.intervalMs}" count="${retry.maxAttempts}"/>
+			</reconnection>
+		</http:request-connection>
+	</http:request-config>
+
+	<!-- ============================================== -->
+	<!-- Object Store Configuration                    -->
+	<!-- ============================================== -->
+
+	<!-- Interaction Context Object Store -->
+	<os:object-store name="Interaction_Context_Store" 
+		persistent="true" 
+		maxEntries="${objectStore.interactionContext.maxEntries}" 
+		entryTtl="${objectStore.interactionContext.entryTtlHours}" 
+		entryTtlUnit="HOURS" 
+		expirationInterval="${objectStore.interactionContext.expirationIntervalMinutes}" 
+		expirationIntervalUnit="MINUTES" 
+		doc:name="Interaction Context Store"/>
+
+</mule>

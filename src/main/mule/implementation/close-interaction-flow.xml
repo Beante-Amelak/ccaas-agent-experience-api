@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+	<!-- ============================================== -->
+	<!-- Close Interaction Flow                        -->
+	<!-- Handles interaction completion and cleanup   -->
+	<!-- ============================================== -->
+
+	<flow name="close-interaction-flow" doc:name="Close Interaction Flow">
+		<!-- Store original request -->
+		<set-variable variableName="completeRequest" value="#[payload]" doc:name="Store Complete Request"/>
+
+		<!-- Retrieve interaction context from Object Store -->
+		<os:contains key="#[vars.interactionId]" 
+			objectStore="Interaction_Context_Store" 
+			target="interactionExists" 
+			doc:name="Check Interaction Exists"/>
+
+		<!-- Validate interaction exists -->
+		<choice doc:name="Validate Interaction">
+			<when expression="#[vars.interactionExists]">
+				<!-- Retrieve interaction context -->
+				<os:retrieve key="#[vars.interactionId]" 
+					objectStore="Interaction_Context_Store" 
+					target="interactionContext" 
+					doc:name="Retrieve Interaction Context">
+					<os:default-value><![CDATA[#[{}]]]></os:default-value>
+				</os:retrieve>
+			</when>
+			<otherwise>
+				<!-- Raise error if interaction not found -->
+				<raise-error type="APP:INTERACTION_NOT_FOUND" description="#['Interaction not found: ' ++ vars.interactionId]" doc:name="Raise Interaction Not Found"/>
+			</otherwise>
+		</choice>
+
+		<!-- Log business event -->
+		<set-variable variableName="businessEvent" value="INTERACTION_CLOSING" doc:name="Set Business Event"/>
+		<flow-ref name="logging-business-event-subflow" doc:name="Log Business Event"/>
+
+		<!-- Build outbound headers -->
+		<flow-ref name="build-outbound-headers-subflow" doc:name="Build Outbound Headers"/>
+
+		<!-- Generate post-call processing ID -->
+		<set-variable variableName="postCallProcessingId" value="#['PCP-' ++ (uuid() splitBy '-')[0]]" doc:name="Generate PCP ID"/>
+
+		<!-- Trigger post-call processing -->
+		<flow-ref name="post-call-processing-flow" doc:name="Post Call Processing"/>
+
+		<!-- Update interaction status in Object Store -->
+		<ee:transform doc:name="Build Closed Context">
+			<ee:variables>
+				<ee:set-variable variableName="closedContext"><![CDATA[%dw 2.0
+output application/json
+---
+vars.interactionContext ++ {
+	status: "CLOSED",
+	disposition: vars.completeRequest.disposition default "UNKNOWN",
+	wrapUpCode: vars.completeRequest.wrapUpCode,
+	notes: vars.completeRequest.notes,
+	recordingConsent: vars.completeRequest.recordingConsent default false,
+	postCallProcessingId: vars.postCallProcessingId,
+	closedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	updatedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+
+		<!-- Update Object Store -->
+		<os:store key="#[vars.interactionId]" 
+			failIfPresent="false" 
+			failOnNullValue="false" 
+			objectStore="Interaction_Context_Store" 
+			doc:name="Update Interaction Context">
+			<os:value><![CDATA[#[vars.closedContext]]]></os:value>
+		</os:store>
+
+		<!-- Notify NICE System API of interaction completion -->
+		<try doc:name="Notify NICE System">
+			<http:request method="PUT" 
+				config-ref="NICE_System_API_Config" 
+				path="/interactions/{interactionId}/complete" 
+				doc:name="Complete Interaction in NICE">
+				<http:headers><![CDATA[#[vars.requestHeaders]]]></http:headers>
+				<http:uri-params><![CDATA[#[{"interactionId": vars.interactionId}]]]></http:uri-params>
+				<http:body><![CDATA[#[output application/json --- vars.closedContext]]]></http:body>
+			</http:request>
+			<error-handler>
+				<on-error-continue type="ANY" logException="true" doc:name="Continue on NICE Error">
+					<logger level="WARN" message="#['[' ++ correlationId ++ '] NICE completion notification failed: ' ++ (error.description default 'Unknown error')]" doc:name="Log NICE Warning"/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+
+		<!-- Update CRM with interaction summary -->
+		<try doc:name="Update CRM">
+			<http:request method="POST" 
+				config-ref="CRM_System_API_Config" 
+				path="/interactions" 
+				doc:name="Log Interaction in CRM">
+				<http:headers><![CDATA[#[vars.requestHeaders]]]></http:headers>
+				<http:body><![CDATA[#[output application/json --- {
+	interactionId: vars.interactionId,
+	customerId: vars.closedContext.customerId,
+	channel: vars.closedContext.channel,
+	disposition: vars.closedContext.disposition,
+	wrapUpCode: vars.closedContext.wrapUpCode,
+	notes: vars.closedContext.notes,
+	duration: null,
+	createdAt: vars.closedContext.createdAt,
+	closedAt: vars.closedContext.closedAt
+}]]]></http:body>
+			</http:request>
+			<error-handler>
+				<on-error-continue type="ANY" logException="true" doc:name="Continue on CRM Error">
+					<logger level="WARN" message="#['[' ++ correlationId ++ '] CRM update failed: ' ++ (error.description default 'Unknown error')]" doc:name="Log CRM Warning"/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+
+		<!-- Log completion -->
+		<set-variable variableName="businessEvent" value="INTERACTION_CLOSED" doc:name="Set Business Event"/>
+		<set-variable variableName="eventDetails" value="#['{\"disposition\": \"' ++ (vars.completeRequest.disposition default 'UNKNOWN') ++ '\", \"postCallProcessingId\": \"' ++ vars.postCallProcessingId ++ '\"}']" doc:name="Set Event Details"/>
+		<flow-ref name="logging-business-event-subflow" doc:name="Log Completion"/>
+
+		<!-- Build response -->
+		<flow-ref name="map-complete-response-subflow" doc:name="Map Response"/>
+
+		<error-handler ref="Global_Error_Handler"/>
+	</flow>
+
+</mule>

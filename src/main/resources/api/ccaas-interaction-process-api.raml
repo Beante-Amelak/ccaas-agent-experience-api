@@ -1,0 +1,257 @@
+#%RAML 1.0
+title: CCaaS Interaction Process API
+version: v1
+baseUri: /api/v1
+mediaType: application/json
+protocols: [ HTTPS ]
+
+securitySchemes:
+  oauth2:
+    type: OAuth 2.0
+    describedBy:
+      headers:
+        Authorization:
+          description: Bearer token
+          type: string
+          required: true
+      responses:
+        401:
+          description: Unauthorized
+        403:
+          description: Forbidden
+    settings:
+      authorizationUri: https://auth.example.com/oauth/authorize
+      accessTokenUri: https://auth.example.com/oauth/token
+      authorizationGrants: [ client_credentials ]
+
+securedBy: [ oauth2 ]
+
+types:
+  InteractionStartRequest:
+    type: object
+    properties:
+      channel:
+        type: string
+        enum: [ VOICE, CHAT, EMAIL, IVR, BOT, OUTBOUND ]
+        required: true
+      customerId:
+        type: string
+        required: false
+      phoneNumber:
+        type: string
+        required: false
+      agentId:
+        type: string
+        required: false
+      queueId:
+        type: string
+        required: false
+      metadata:
+        type: object
+        required: false
+
+  InteractionStartResponse:
+    type: object
+    properties:
+      interactionId:
+        type: string
+        required: true
+      routingDecision:
+        type: string
+        required: true
+      customerContext:
+        type: object
+        required: false
+      timestamp:
+        type: datetime
+        required: true
+
+  RouteRequest:
+    type: object
+    properties:
+      skillRequired:
+        type: string
+        required: false
+      priority:
+        type: integer
+        required: false
+      routingHints:
+        type: object
+        required: false
+
+  RouteResponse:
+    type: object
+    properties:
+      status:
+        type: string
+        required: true
+      routingDecision:
+        type: string
+        required: true
+      targetQueue:
+        type: string
+        required: false
+      estimatedWaitTime:
+        type: integer
+        required: false
+
+  CompleteRequest:
+    type: object
+    properties:
+      disposition:
+        type: string
+        required: true
+      wrapUpCode:
+        type: string
+        required: false
+      notes:
+        type: string
+        required: false
+      recordingConsent:
+        type: boolean
+        required: false
+
+  CompleteResponse:
+    type: object
+    properties:
+      status:
+        type: string
+        required: true
+      postCallProcessingId:
+        type: string
+        required: false
+
+  ErrorResponse:
+    type: object
+    properties:
+      timestamp:
+        type: datetime
+        required: true
+      correlationId:
+        type: string
+        required: true
+      errorCode:
+        type: string
+        required: true
+      message:
+        type: string
+        required: true
+      details:
+        type: object
+        required: false
+
+/interactions:
+  /start:
+    post:
+      displayName: Start Interaction
+      description: Start a customer interaction and aggregate context
+      body:
+        application/json:
+          type: InteractionStartRequest
+          example:
+            channel: "VOICE"
+            customerId: "CUST-12345"
+            phoneNumber: "+1-555-123-4567"
+            agentId: "AGT-001"
+            metadata:
+              source: "IVR"
+              campaignId: "CAMP-2024"
+      responses:
+        201:
+          body:
+            application/json:
+              type: InteractionStartResponse
+              example:
+                interactionId: "INT-10001"
+                routingDecision: "SALES"
+                customerContext:
+                  name: "John Doe"
+                  accountStatus: "ACTIVE"
+                  tier: "GOLD"
+                timestamp: "2026-01-01T10:00:00Z"
+        400:
+          body:
+            application/json:
+              type: ErrorResponse
+        500:
+          body:
+            application/json:
+              type: ErrorResponse
+
+  /{interactionId}:
+    uriParameters:
+      interactionId:
+        type: string
+        description: Unique interaction identifier
+        example: "INT-10001"
+    
+    /route:
+      post:
+        displayName: Route Interaction
+        description: Determine and publish routing decision
+        body:
+          application/json:
+            type: RouteRequest
+            example:
+              skillRequired: "SALES"
+              priority: 1
+              routingHints:
+                language: "en-US"
+                region: "WEST"
+        responses:
+          202:
+            description: Accepted
+            body:
+              application/json:
+                type: RouteResponse
+                example:
+                  status: "ACCEPTED"
+                  routingDecision: "SALES_QUEUE_WEST"
+                  targetQueue: "Q-SALES-WEST-001"
+                  estimatedWaitTime: 120
+          400:
+            body:
+              application/json:
+                type: ErrorResponse
+          404:
+            body:
+              application/json:
+                type: ErrorResponse
+          500:
+            body:
+              application/json:
+                type: ErrorResponse
+
+    /complete:
+      post:
+        displayName: Complete Interaction
+        description: Close interaction and trigger post-call processing
+        body:
+          application/json:
+            type: CompleteRequest
+            example:
+              disposition: "RESOLVED"
+              wrapUpCode: "SALES_COMPLETE"
+              notes: "Customer upgraded to premium plan"
+              recordingConsent: true
+        responses:
+          202:
+            description: Accepted
+            body:
+              application/json:
+                type: CompleteResponse
+                example:
+                  status: "ACCEPTED"
+                  postCallProcessingId: "PCP-20001"
+          400:
+            body:
+              application/json:
+                type: ErrorResponse
+          404:
+            body:
+              application/json:
+                type: ErrorResponse
+          500:
+            body:
+              application/json:
+                type: ErrorResponse

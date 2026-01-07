@@ -1,0 +1,232 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+	<!-- ============================================== -->
+	<!-- Determine Routing Flow                        -->
+	<!-- Handles routing decision for interactions     -->
+	<!-- ============================================== -->
+
+	<flow name="determine-routing-flow" doc:name="Determine Routing Flow">
+		<!-- Store original request -->
+		<set-variable variableName="routeRequest" value="#[payload]" doc:name="Store Route Request"/>
+
+		<!-- Retrieve interaction context from Object Store -->
+		<os:contains key="#[vars.interactionId]" 
+			objectStore="Interaction_Context_Store" 
+			target="interactionExists" 
+			doc:name="Check Interaction Exists"/>
+
+		<!-- Validate interaction exists -->
+		<choice doc:name="Validate Interaction">
+			<when expression="#[vars.interactionExists]">
+				<os:retrieve key="#[vars.interactionId]" 
+					objectStore="Interaction_Context_Store" 
+					target="interactionContext" 
+					doc:name="Retrieve Interaction Context">
+					<os:default-value><![CDATA[#[{}]]]></os:default-value>
+				</os:retrieve>
+			</when>
+			<otherwise>
+				<raise-error type="APP:INTERACTION_NOT_FOUND" description="#['Interaction not found: ' ++ vars.interactionId]" doc:name="Raise Interaction Not Found"/>
+			</otherwise>
+		</choice>
+
+		<!-- Log business event -->
+		<set-variable variableName="businessEvent" value="ROUTING_REQUESTED" doc:name="Set Business Event"/>
+		<flow-ref name="logging-business-event-subflow" doc:name="Log Business Event"/>
+
+		<!-- Build outbound headers -->
+		<flow-ref name="build-outbound-headers-subflow" doc:name="Build Outbound Headers"/>
+
+		<!-- Get WFM data for queue availability -->
+		<scatter-gather doc:name="Gather Routing Data">
+			<route>
+				<try doc:name="Get WFM Queue Status">
+					<http:request method="GET" 
+						config-ref="WFM_System_API_Config" 
+						path="/queues/status" 
+						doc:name="Get Queue Status">
+						<http:headers><![CDATA[#[vars.requestHeaders]]]></http:headers>
+					</http:request>
+					<error-handler>
+						<on-error-continue type="ANY" logException="true" doc:name="Continue on WFM Error">
+							<ee:transform doc:name="Default Queue Status">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	queues: [],
+	error: true,
+	errorMessage: error.description default "WFM unavailable"
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</route>
+			<route>
+				<try doc:name="Get Dialer Campaign Status">
+					<http:request method="GET" 
+						config-ref="Dialer_System_API_Config" 
+						path="/campaigns/active" 
+						doc:name="Get Active Campaigns">
+						<http:headers><![CDATA[#[vars.requestHeaders]]]></http:headers>
+					</http:request>
+					<error-handler>
+						<on-error-continue type="ANY" logException="true" doc:name="Continue on Dialer Error">
+							<ee:transform doc:name="Default Campaign Status">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	campaigns: [],
+	error: true,
+	errorMessage: error.description default "Dialer unavailable"
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</route>
+		</scatter-gather>
+
+		<!-- Aggregate routing data -->
+		<ee:transform doc:name="Aggregate Routing Data">
+			<ee:variables>
+				<ee:set-variable variableName="wfmData"><![CDATA[#[payload."0".payload]]]></ee:set-variable>
+				<ee:set-variable variableName="dialerData"><![CDATA[#[payload."1".payload]]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+
+		<!-- Calculate final routing decision -->
+		<ee:transform doc:name="Calculate Routing Decision">
+			<ee:variables>
+				<ee:set-variable variableName="routingDecision"><![CDATA[%dw 2.0
+output application/java
+
+var interactionContext = vars.interactionContext default {}
+var routeRequest = vars.routeRequest default {}
+var wfmData = vars.wfmData default {}
+var dialerData = vars.dialerData default {}
+
+// Get skill requirement from request or context
+var skillRequired = routeRequest.skillRequired default interactionContext.routingDecision default "GENERAL_SUPPORT"
+
+// Get priority from request or calculate
+var priority = routeRequest.priority default 50
+
+// Determine target queue based on skill and availability
+var targetQueue = skillRequired match {
+	case "SALES" -> "Q-SALES-001"
+	case "RETENTION" -> "Q-RETENTION-001"
+	case "VIP_SUPPORT" -> "Q-VIP-001"
+	case "COLLECTIONS" -> "Q-COLLECTIONS-001"
+	case "OUTBOUND_SALES" -> "Q-OUTBOUND-001"
+	else -> "Q-GENERAL-001"
+}
+
+// Apply routing hints if provided
+var region = (routeRequest.routingHints.region default "DEFAULT") as String
+var finalQueue = if (region != "DEFAULT") 
+	targetQueue ++ "-" ++ region
+	else targetQueue
+
+---
+skillRequired ++ "_" ++ region]]></ee:set-variable>
+				<ee:set-variable variableName="targetQueue"><![CDATA[%dw 2.0
+output application/java
+
+var skillRequired = vars.routeRequest.skillRequired default vars.interactionContext.routingDecision default "GENERAL_SUPPORT"
+var region = (vars.routeRequest.routingHints.region default "DEFAULT") as String
+
+var baseQueue = skillRequired match {
+	case "SALES" -> "Q-SALES-001"
+	case "RETENTION" -> "Q-RETENTION-001"
+	case "VIP_SUPPORT" -> "Q-VIP-001"
+	case "COLLECTIONS" -> "Q-COLLECTIONS-001"
+	case "OUTBOUND_SALES" -> "Q-OUTBOUND-001"
+	else -> "Q-GENERAL-001"
+}
+
+---
+if (region != "DEFAULT") baseQueue ++ "-" ++ region else baseQueue]]></ee:set-variable>
+				<ee:set-variable variableName="estimatedWaitTime"><![CDATA[%dw 2.0
+output application/java
+---
+// Default estimated wait time in seconds
+120]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+
+		<!-- Update interaction context with routing decision -->
+		<ee:transform doc:name="Update Context">
+			<ee:variables>
+				<ee:set-variable variableName="updatedContext"><![CDATA[%dw 2.0
+output application/json
+---
+vars.interactionContext ++ {
+	routingDecision: vars.routingDecision,
+	targetQueue: vars.targetQueue,
+	estimatedWaitTime: vars.estimatedWaitTime,
+	routedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	updatedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+
+		<!-- Update Object Store -->
+		<os:store key="#[vars.interactionId]" 
+			failIfPresent="false" 
+			failOnNullValue="false" 
+			objectStore="Interaction_Context_Store" 
+			doc:name="Update Interaction Context">
+			<os:value><![CDATA[#[vars.updatedContext]]]></os:value>
+		</os:store>
+
+		<!-- Publish routing decision to NICE -->
+		<try doc:name="Publish to NICE">
+			<http:request method="POST" 
+				config-ref="NICE_System_API_Config" 
+				path="/interactions/{interactionId}/route" 
+				doc:name="Publish Routing to NICE">
+				<http:headers><![CDATA[#[vars.requestHeaders]]]></http:headers>
+				<http:uri-params><![CDATA[#[{"interactionId": vars.interactionId}]]]></http:uri-params>
+				<http:body><![CDATA[#[output application/json --- {
+	routingDecision: vars.routingDecision,
+	targetQueue: vars.targetQueue,
+	priority: vars.routeRequest.priority default 50
+}]]]></http:body>
+			</http:request>
+			<error-handler>
+				<on-error-continue type="ANY" logException="true" doc:name="Continue on NICE Error">
+					<logger level="WARN" message="#['[' ++ correlationId ++ '] NICE routing publish failed: ' ++ (error.description default 'Unknown error')]" doc:name="Log NICE Warning"/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+
+		<!-- Log routing decision -->
+		<set-variable variableName="businessEvent" value="ROUTING_DECISION_MADE" doc:name="Set Business Event"/>
+		<set-variable variableName="eventDetails" value="#['{\"routingDecision\": \"' ++ vars.routingDecision ++ '\", \"targetQueue\": \"' ++ vars.targetQueue ++ '\"}']" doc:name="Set Event Details"/>
+		<flow-ref name="logging-business-event-subflow" doc:name="Log Routing Decision"/>
+
+		<!-- Build response -->
+		<flow-ref name="map-route-response-subflow" doc:name="Map Response"/>
+
+		<error-handler ref="Global_Error_Handler"/>
+	</flow>
+
+</mule>

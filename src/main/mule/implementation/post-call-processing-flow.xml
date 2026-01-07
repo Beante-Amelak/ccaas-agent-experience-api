@@ -1,0 +1,233 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- ============================================== -->
+	<!-- Post-Call Processing Flow                     -->
+	<!-- Handles recording, analytics, and cleanup     -->
+	<!-- ============================================== -->
+
+	<flow name="post-call-processing-flow" doc:name="Post-Call Processing Flow">
+		<!-- Log post-call processing start -->
+		<logger level="INFO" message="#['[' ++ correlationId ++ '] Starting post-call processing for interaction: ' ++ vars.interactionId ++ ', PCP ID: ' ++ vars.postCallProcessingId]" doc:name="Log PCP Start"/>
+
+		<!-- Build outbound headers if not already set -->
+		<choice doc:name="Check Headers">
+			<when expression="#[vars.requestHeaders == null]">
+				<flow-ref name="build-outbound-headers-subflow" doc:name="Build Headers"/>
+			</when>
+			<otherwise>
+				<logger level="TRACE" message="Headers already set" doc:name="Skip Headers"/>
+			</otherwise>
+		</choice>
+
+		<!-- Parallel post-call processing tasks -->
+		<scatter-gather doc:name="Parallel Post-Call Tasks">
+			<!-- Route 1: Submit recording for processing -->
+			<route>
+				<try doc:name="Process Recording">
+					<choice doc:name="Check Recording Consent">
+						<when expression="#[vars.completeRequest.recordingConsent default false]">
+							<http:request method="POST" 
+								config-ref="Recording_System_API_Config" 
+								path="/recordings/process" 
+								doc:name="Submit Recording for Processing">
+								<http:headers><![CDATA[#[vars.requestHeaders]]]></http:headers>
+								<http:body><![CDATA[#[output application/json --- {
+	interactionId: vars.interactionId,
+	postCallProcessingId: vars.postCallProcessingId,
+	recordingConsent: true,
+	processingOptions: {
+		transcription: true,
+		sentimentAnalysis: true,
+		qualityScoring: true,
+		complianceCheck: true
+	}
+}]]]></http:body>
+							</http:request>
+							<ee:transform doc:name="Recording Submitted">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	task: "RECORDING_PROCESSING",
+	status: "SUBMITTED",
+	response: payload
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</when>
+						<otherwise>
+							<ee:transform doc:name="Recording Skipped">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	task: "RECORDING_PROCESSING",
+	status: "SKIPPED",
+	reason: "No recording consent"
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</otherwise>
+					</choice>
+					<error-handler>
+						<on-error-continue type="ANY" logException="true" doc:name="Continue on Recording Error">
+							<ee:transform doc:name="Recording Error">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	task: "RECORDING_PROCESSING",
+	status: "ERROR",
+	error: error.description default "Recording processing failed"
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</route>
+
+			<!-- Route 2: Update WFM with interaction metrics -->
+			<route>
+				<try doc:name="Update WFM Metrics">
+					<http:request method="POST" 
+						config-ref="WFM_System_API_Config" 
+						path="/metrics/interactions" 
+						doc:name="Submit Interaction Metrics">
+						<http:headers><![CDATA[#[vars.requestHeaders]]]></http:headers>
+						<http:body><![CDATA[#[output application/json --- {
+	interactionId: vars.interactionId,
+	agentId: vars.interactionContext.agentId,
+	queueId: vars.interactionContext.queueId,
+	channel: vars.interactionContext.channel,
+	disposition: vars.completeRequest.disposition,
+	wrapUpCode: vars.completeRequest.wrapUpCode,
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]]></http:body>
+					</http:request>
+					<ee:transform doc:name="WFM Updated">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	task: "WFM_METRICS",
+	status: "SUBMITTED",
+	response: payload
+}]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+					<error-handler>
+						<on-error-continue type="ANY" logException="true" doc:name="Continue on WFM Error">
+							<ee:transform doc:name="WFM Error">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	task: "WFM_METRICS",
+	status: "ERROR",
+	error: error.description default "WFM metrics update failed"
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</route>
+
+			<!-- Route 3: Trigger analytics/reporting -->
+			<route>
+				<try doc:name="Submit Analytics">
+					<http:request method="POST" 
+						config-ref="NICE_System_API_Config" 
+						path="/analytics/interactions" 
+						doc:name="Submit to Analytics">
+						<http:headers><![CDATA[#[vars.requestHeaders]]]></http:headers>
+						<http:body><![CDATA[#[output application/json --- {
+	interactionId: vars.interactionId,
+	postCallProcessingId: vars.postCallProcessingId,
+	customerId: vars.interactionContext.customerId,
+	channel: vars.interactionContext.channel,
+	routingDecision: vars.interactionContext.routingDecision,
+	disposition: vars.completeRequest.disposition,
+	customerTier: vars.interactionContext.customerContext.tier default "STANDARD",
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]]></http:body>
+					</http:request>
+					<ee:transform doc:name="Analytics Submitted">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	task: "ANALYTICS",
+	status: "SUBMITTED",
+	response: payload
+}]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+					<error-handler>
+						<on-error-continue type="ANY" logException="true" doc:name="Continue on Analytics Error">
+							<ee:transform doc:name="Analytics Error">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	task: "ANALYTICS",
+	status: "ERROR",
+	error: error.description default "Analytics submission failed"
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</route>
+		</scatter-gather>
+
+		<!-- Aggregate post-call processing results -->
+		<ee:transform doc:name="Aggregate PCP Results">
+			<ee:variables>
+				<ee:set-variable variableName="pcpResults"><![CDATA[%dw 2.0
+output application/json
+---
+{
+	postCallProcessingId: vars.postCallProcessingId,
+	interactionId: vars.interactionId,
+	tasks: [
+		payload."0".payload,
+		payload."1".payload,
+		payload."2".payload
+	],
+	completedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	overallStatus: if ((payload."0".payload.status == "ERROR") or 
+		(payload."1".payload.status == "ERROR") or 
+		(payload."2".payload.status == "ERROR")) "PARTIAL_SUCCESS" 
+		else "SUCCESS"
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+
+		<!-- Log post-call processing completion -->
+		<set-variable variableName="businessEvent" value="POST_CALL_PROCESSING_COMPLETE" doc:name="Set Business Event"/>
+		<set-variable variableName="eventDetails" value="#['{\"postCallProcessingId\": \"' ++ vars.postCallProcessingId ++ '\", \"status\": \"' ++ vars.pcpResults.overallStatus ++ '\"}']" doc:name="Set Event Details"/>
+		<flow-ref name="logging-business-event-subflow" doc:name="Log PCP Complete"/>
+
+		<error-handler ref="Global_Error_Handler"/>
+	</flow>
+
+</mule>

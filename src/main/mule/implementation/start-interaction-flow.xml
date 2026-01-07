@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:os="http://www.mulesoft.org/schema/mule/os"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd
+		http://www.mulesoft.org/schema/mule/os http://www.mulesoft.org/schema/mule/os/current/mule-os.xsd">
+
+	<!-- ============================================== -->
+	<!-- Start Interaction Flow                        -->
+	<!-- Orchestrates interaction initialization       -->
+	<!-- ============================================== -->
+
+	<flow name="start-interaction-flow" doc:name="Start Interaction Flow">
+		<!-- Store original request -->
+		<set-variable variableName="originalRequest" value="#[payload]" doc:name="Store Original Request"/>
+
+		<!-- Generate unique interaction ID -->
+		<set-variable variableName="interactionId" value="#['INT-' ++ (uuid() splitBy '-')[0]]" doc:name="Generate Interaction ID"/>
+
+		<!-- Log business event -->
+		<set-variable variableName="businessEvent" value="INTERACTION_STARTED" doc:name="Set Business Event"/>
+		<flow-ref name="logging-business-event-subflow" doc:name="Log Business Event"/>
+
+		<!-- Build outbound headers for system API calls -->
+		<flow-ref name="build-outbound-headers-subflow" doc:name="Build Outbound Headers"/>
+
+		<!-- Aggregate customer context from multiple systems in parallel -->
+		<flow-ref name="aggregate-customer-context-flow" doc:name="Aggregate Customer Context"/>
+
+		<!-- Enrich interaction with business rules -->
+		<flow-ref name="enrich-interaction-flow" doc:name="Enrich Interaction"/>
+
+		<!-- Validate compliance requirements -->
+		<flow-ref name="compliance-validation-flow" doc:name="Validate Compliance"/>
+
+		<!-- Determine initial routing decision -->
+		<flow-ref name="determine-routing-subflow" doc:name="Determine Initial Routing"/>
+
+		<!-- Store interaction context in Object Store -->
+		<ee:transform doc:name="Build Interaction Context">
+			<ee:variables>
+				<ee:set-variable variableName="interactionContext"><![CDATA[%dw 2.0
+output application/json
+---
+{
+	interactionId: vars.interactionId,
+	channel: vars.originalRequest.channel default "UNKNOWN",
+	customerId: vars.originalRequest.customerId,
+	phoneNumber: vars.originalRequest.phoneNumber,
+	agentId: vars.originalRequest.agentId,
+	queueId: vars.originalRequest.queueId,
+	metadata: vars.originalRequest.metadata default {},
+	customerContext: vars.customerContext default {},
+	routingDecision: vars.routingDecision,
+	complianceStatus: vars.complianceStatus default "VALIDATED",
+	status: "ACTIVE",
+	createdAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	updatedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+
+		<!-- Store in Object Store -->
+		<os:store key="#[vars.interactionId]" 
+			failIfPresent="false" 
+			failOnNullValue="false" 
+			objectStore="Interaction_Context_Store" 
+			doc:name="Store Interaction Context">
+			<os:value><![CDATA[#[vars.interactionContext]]]></os:value>
+		</os:store>
+
+		<!-- Notify NICE System API of new interaction -->
+		<try doc:name="Notify NICE System">
+			<http:request method="POST" 
+				config-ref="NICE_System_API_Config" 
+				path="/interactions" 
+				doc:name="Create Interaction in NICE">
+				<http:headers><![CDATA[#[vars.requestHeaders]]]></http:headers>
+				<http:body><![CDATA[#[output application/json --- vars.interactionContext]]]></http:body>
+			</http:request>
+			<error-handler>
+				<on-error-continue type="ANY" logException="true" doc:name="Continue on NICE Error">
+					<logger level="WARN" message="#['[' ++ correlationId ++ '] NICE notification failed - continuing with interaction: ' ++ (error.description default 'Unknown error')]" doc:name="Log NICE Warning"/>
+				</on-error-continue>
+			</error-handler>
+		</try>
+
+		<!-- Build response -->
+		<flow-ref name="map-interaction-start-response-subflow" doc:name="Map Response"/>
+
+		<error-handler ref="Global_Error_Handler"/>
+	</flow>
+
+</mule>

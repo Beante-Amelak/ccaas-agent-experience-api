@@ -1,0 +1,188 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- MUnit Configuration -->
+	<munit:config name="error-handler-test.xml"/>
+
+	<!-- ============================================== -->
+	<!-- Test: HTTP Connectivity Error Handling        -->
+	<!-- ============================================== -->
+
+	<munit:test name="test-http-connectivity-error" description="Test HTTP connectivity error returns 503">
+		<munit:behavior>
+			<!-- Mock all HTTP requests to fail with connectivity error -->
+			<munit-tools:mock-when processor="http:request" doc:name="Mock HTTP Connectivity Error">
+				<munit-tools:then-return>
+					<munit-tools:error typeId="HTTP:CONNECTIVITY"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+
+		<munit:execution>
+			<try doc:name="Try HTTP Request">
+				<http:request method="GET" config-ref="CRM_System_API_Config" path="/test" doc:name="Test Request"/>
+				<error-handler ref="Global_Error_Handler"/>
+			</try>
+		</munit:execution>
+
+		<munit:validation>
+			<munit-tools:assert-equals actual="#[vars.httpStatus]" expected="#[503]" doc:name="Assert HTTP 503 Status"/>
+			<munit-tools:assert-equals actual="#[payload.errorCode]" expected="#['CCAS-PROC-503']" doc:name="Assert Error Code"/>
+			<munit-tools:assert-that expression="#[payload.correlationId]" is="#[MunitTools::notNullValue()]" doc:name="Assert Correlation ID exists"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- ============================================== -->
+	<!-- Test: HTTP Timeout Error Handling             -->
+	<!-- ============================================== -->
+
+	<munit:test name="test-http-timeout-error" description="Test HTTP timeout error returns 504">
+		<munit:behavior>
+			<!-- Mock HTTP request to fail with timeout -->
+			<munit-tools:mock-when processor="http:request" doc:name="Mock HTTP Timeout">
+				<munit-tools:then-return>
+					<munit-tools:error typeId="HTTP:TIMEOUT"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+
+		<munit:execution>
+			<try doc:name="Try HTTP Request">
+				<http:request method="GET" config-ref="CRM_System_API_Config" path="/test" doc:name="Test Request"/>
+				<error-handler ref="Global_Error_Handler"/>
+			</try>
+		</munit:execution>
+
+		<munit:validation>
+			<munit-tools:assert-equals actual="#[vars.httpStatus]" expected="#[504]" doc:name="Assert HTTP 504 Status"/>
+			<munit-tools:assert-equals actual="#[payload.errorCode]" expected="#['CCAS-PROC-504']" doc:name="Assert Error Code"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- ============================================== -->
+	<!-- Test: Interaction Not Found Error             -->
+	<!-- ============================================== -->
+
+	<munit:test name="test-interaction-not-found-error" description="Test interaction not found returns 404">
+		<munit:execution>
+			<try doc:name="Try Raise Error">
+				<raise-error type="APP:INTERACTION_NOT_FOUND" description="Interaction INT-999 not found" doc:name="Raise Not Found"/>
+				<error-handler ref="Global_Error_Handler"/>
+			</try>
+		</munit:execution>
+
+		<munit:validation>
+			<munit-tools:assert-equals actual="#[vars.httpStatus]" expected="#[404]" doc:name="Assert HTTP 404 Status"/>
+			<munit-tools:assert-equals actual="#[payload.errorCode]" expected="#['CCAS-PROC-404']" doc:name="Assert Error Code"/>
+			<munit-tools:assert-that expression="#[payload.message contains 'not found']" is="#[MunitTools::equalTo(true)]" doc:name="Assert Error Message"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- ============================================== -->
+	<!-- Test: Compliance Violation Error              -->
+	<!-- ============================================== -->
+
+	<munit:test name="test-compliance-violation-error" description="Test compliance violation returns 422">
+		<munit:execution>
+			<try doc:name="Try Raise Error">
+				<raise-error type="APP:COMPLIANCE_VIOLATION" description="DNC check failed" doc:name="Raise Compliance Error"/>
+				<error-handler ref="Global_Error_Handler"/>
+			</try>
+		</munit:execution>
+
+		<munit:validation>
+			<munit-tools:assert-equals actual="#[vars.httpStatus]" expected="#[422]" doc:name="Assert HTTP 422 Status"/>
+			<munit-tools:assert-equals actual="#[payload.errorCode]" expected="#['CCAS-PROC-422']" doc:name="Assert Error Code"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- ============================================== -->
+	<!-- Test: Generic Error Handling                  -->
+	<!-- ============================================== -->
+
+	<munit:test name="test-generic-error" description="Test generic error returns 500">
+		<munit:execution>
+			<try doc:name="Try Raise Error">
+				<raise-error type="MULE:UNKNOWN" description="Unexpected error occurred" doc:name="Raise Generic Error"/>
+				<error-handler ref="Global_Error_Handler"/>
+			</try>
+		</munit:execution>
+
+		<munit:validation>
+			<munit-tools:assert-equals actual="#[vars.httpStatus]" expected="#[500]" doc:name="Assert HTTP 500 Status"/>
+			<munit-tools:assert-equals actual="#[payload.errorCode]" expected="#['CCAS-PROC-500']" doc:name="Assert Error Code"/>
+			<munit-tools:assert-that expression="#[payload.timestamp]" is="#[MunitTools::notNullValue()]" doc:name="Assert Timestamp exists"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- ============================================== -->
+	<!-- Test: Error Response Structure                -->
+	<!-- ============================================== -->
+
+	<munit:test name="test-error-response-structure" description="Test error response has correct structure">
+		<munit:execution>
+			<try doc:name="Try Raise Error">
+				<raise-error type="APP:ROUTING_FAILURE" description="Unable to determine routing" doc:name="Raise Routing Error"/>
+				<error-handler ref="Global_Error_Handler"/>
+			</try>
+		</munit:execution>
+
+		<munit:validation>
+			<!-- Verify all required fields in error response -->
+			<munit-tools:assert-that expression="#[payload.timestamp]" is="#[MunitTools::notNullValue()]" doc:name="Assert timestamp exists"/>
+			<munit-tools:assert-that expression="#[payload.correlationId]" is="#[MunitTools::notNullValue()]" doc:name="Assert correlationId exists"/>
+			<munit-tools:assert-that expression="#[payload.errorCode]" is="#[MunitTools::notNullValue()]" doc:name="Assert errorCode exists"/>
+			<munit-tools:assert-that expression="#[payload.message]" is="#[MunitTools::notNullValue()]" doc:name="Assert message exists"/>
+			<munit-tools:assert-that expression="#[payload.details]" is="#[MunitTools::notNullValue()]" doc:name="Assert details exists"/>
+			<munit-tools:assert-that expression="#[payload.details.errorType]" is="#[MunitTools::notNullValue()]" doc:name="Assert errorType in details"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- ============================================== -->
+	<!-- Test: Retry Behavior Verification             -->
+	<!-- ============================================== -->
+
+	<munit:test name="test-idempotent-error-handling" description="Test that errors are handled idempotently">
+		<munit:behavior>
+			<!-- First call fails, second succeeds -->
+			<munit-tools:mock-when processor="http:request" doc:name="Mock HTTP Error">
+				<munit-tools:then-return>
+					<munit-tools:error typeId="HTTP:CONNECTIVITY"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+
+		<munit:execution>
+			<!-- First attempt -->
+			<try doc:name="First Attempt">
+				<http:request method="GET" config-ref="CRM_System_API_Config" path="/test" doc:name="Test Request 1"/>
+				<error-handler ref="Global_Error_Handler"/>
+			</try>
+			<set-variable variableName="firstErrorCode" value="#[payload.errorCode]" doc:name="Store First Error"/>
+
+			<!-- Second attempt (same error) -->
+			<try doc:name="Second Attempt">
+				<http:request method="GET" config-ref="CRM_System_API_Config" path="/test" doc:name="Test Request 2"/>
+				<error-handler ref="Global_Error_Handler"/>
+			</try>
+		</munit:execution>
+
+		<munit:validation>
+			<!-- Both errors should produce same error code -->
+			<munit-tools:assert-equals actual="#[vars.firstErrorCode]" expected="#[payload.errorCode]" doc:name="Assert Idempotent Error Codes"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

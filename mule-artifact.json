@@ -1,0 +1,11 @@
+{
+  "minMuleVersion": "4.9.3",
+  "javaSpecificationVersions": ["17"],
+  "secureProperties": ["secure.key", 
+  "nice.api.clientSecret", 
+  "crm.api.clientSecret", 
+  "billing.api.clientSecret", 
+  "wfm.api.clientSecret", 
+  "dialer.api.clientSecret", 
+  "recording.api.clientSecret"]
+}

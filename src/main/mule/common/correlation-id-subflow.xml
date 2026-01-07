@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- ============================================== -->
+	<!-- Correlation ID Subflow                        -->
+	<!-- Generates or propagates correlation ID        -->
+	<!-- ============================================== -->
+
+	<sub-flow name="correlation-id-subflow" doc:name="Correlation ID Subflow">
+		<!-- Check if correlation ID exists in headers, otherwise generate new one -->
+		<choice doc:name="Check Correlation ID">
+			<when expression="#[!isEmpty(attributes.headers.'x-correlation-id')]">
+				<!-- Use existing correlation ID from header -->
+				<set-variable variableName="correlationId" 
+					value="#[attributes.headers.'x-correlation-id']" 
+					doc:name="Use Existing Correlation ID"/>
+				<logger level="DEBUG" 
+					message="#['Using existing correlation ID: ' ++ vars.correlationId]" 
+					doc:name="Log Existing ID"/>
+			</when>
+			<otherwise>
+				<!-- Generate new correlation ID -->
+				<set-variable variableName="correlationId" 
+					value="#[uuid()]" 
+					doc:name="Generate New Correlation ID"/>
+				<logger level="DEBUG" 
+					message="#['Generated new correlation ID: ' ++ vars.correlationId]" 
+					doc:name="Log New ID"/>
+			</otherwise>
+		</choice>
+
+		<!-- Set correlation ID in outbound headers for propagation -->
+		<set-variable variableName="outboundHeaders" 
+			value="#[(vars.outboundHeaders default {}) ++ {'x-correlation-id': vars.correlationId}]" 
+			doc:name="Set Outbound Correlation Header"/>
+	</sub-flow>
+
+	<!-- ============================================== -->
+	<!-- Correlation ID Header Builder Subflow         -->
+	<!-- Builds headers for outbound HTTP requests     -->
+	<!-- ============================================== -->
+
+	<sub-flow name="build-outbound-headers-subflow" doc:name="Build Outbound Headers Subflow">
+		<ee:transform doc:name="Build Request Headers">
+			<ee:variables>
+				<ee:set-variable variableName="requestHeaders"><![CDATA[%dw 2.0
+output application/java
+---
+{
+	"Content-Type": "application/json",
+	"Accept": "application/json",
+	"x-correlation-id": vars.correlationId default correlationId,
+	"x-request-timestamp": now() as String {format: "yyyy-MM-dd'T'HH:mm:ss.SSSZ"}
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+	</sub-flow>
+
+</mule>

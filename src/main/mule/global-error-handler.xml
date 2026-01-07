@@ -1,0 +1,389 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- ============================================== -->
+	<!-- Global Error Handler                          -->
+	<!-- Handles all errors not caught by flow-level   -->
+	<!-- error handlers                                -->
+	<!-- ============================================== -->
+
+	<error-handler name="Global_Error_Handler" doc:name="Global Error Handler">
+
+		<!-- ============================================== -->
+		<!-- APIKIT Errors                                 -->
+		<!-- ============================================== -->
+
+		<on-error-propagate type="APIKIT:BAD_REQUEST" logException="true" doc:name="APIKIT Bad Request">
+			<ee:transform doc:name="Map 400 Error Response">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: correlationId,
+	errorCode: "CCAS-PROC-400",
+	message: "Bad Request - Invalid input data",
+	details: {
+		errorType: error.errorType.namespace ++ ":" ++ error.errorType.identifier,
+		description: error.description default "The request payload is invalid or malformed"
+	}
+}]]></ee:set-payload>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[400]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+
+		<on-error-propagate type="APIKIT:NOT_FOUND" logException="true" doc:name="APIKIT Not Found">
+			<ee:transform doc:name="Map 404 Error Response">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: correlationId,
+	errorCode: "CCAS-PROC-404",
+	message: "Resource Not Found",
+	details: {
+		errorType: error.errorType.namespace ++ ":" ++ error.errorType.identifier,
+		description: error.description default "The requested resource was not found"
+	}
+}]]></ee:set-payload>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[404]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+
+		<on-error-propagate type="APIKIT:METHOD_NOT_ALLOWED" logException="true" doc:name="APIKIT Method Not Allowed">
+			<ee:transform doc:name="Map 405 Error Response">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: correlationId,
+	errorCode: "CCAS-PROC-405",
+	message: "Method Not Allowed",
+	details: {
+		errorType: error.errorType.namespace ++ ":" ++ error.errorType.identifier,
+		description: error.description default "The HTTP method is not allowed for this resource"
+	}
+}]]></ee:set-payload>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[405]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+
+		<on-error-propagate type="APIKIT:NOT_ACCEPTABLE" logException="true" doc:name="APIKIT Not Acceptable">
+			<ee:transform doc:name="Map 406 Error Response">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: correlationId,
+	errorCode: "CCAS-PROC-406",
+	message: "Not Acceptable",
+	details: {
+		errorType: error.errorType.namespace ++ ":" ++ error.errorType.identifier,
+		description: error.description default "The requested media type is not supported"
+	}
+}]]></ee:set-payload>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[406]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+
+		<on-error-propagate type="APIKIT:UNSUPPORTED_MEDIA_TYPE" logException="true" doc:name="APIKIT Unsupported Media Type">
+			<ee:transform doc:name="Map 415 Error Response">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: correlationId,
+	errorCode: "CCAS-PROC-415",
+	message: "Unsupported Media Type",
+	details: {
+		errorType: error.errorType.namespace ++ ":" ++ error.errorType.identifier,
+		description: error.description default "The request content type is not supported"
+	}
+}]]></ee:set-payload>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[415]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+
+		<!-- ============================================== -->
+		<!-- HTTP Connectivity & Timeout Errors            -->
+		<!-- ============================================== -->
+
+		<on-error-propagate type="HTTP:CONNECTIVITY" logException="true" doc:name="HTTP Connectivity Error">
+			<ee:transform doc:name="Map 503 Error Response">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: correlationId,
+	errorCode: "CCAS-PROC-503",
+	message: "Service Unavailable - Downstream system connectivity failure",
+	details: {
+		errorType: error.errorType.namespace ++ ":" ++ error.errorType.identifier,
+		description: "Unable to connect to downstream system. Please retry later."
+	}
+}]]></ee:set-payload>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[503]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+
+		<on-error-propagate type="HTTP:TIMEOUT" logException="true" doc:name="HTTP Timeout Error">
+			<ee:transform doc:name="Map 504 Error Response">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: correlationId,
+	errorCode: "CCAS-PROC-504",
+	message: "Gateway Timeout - Downstream system did not respond in time",
+	details: {
+		errorType: error.errorType.namespace ++ ":" ++ error.errorType.identifier,
+		description: "The downstream service timed out. Please retry later."
+	}
+}]]></ee:set-payload>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[504]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+
+		<on-error-propagate type="HTTP:UNAUTHORIZED" logException="true" doc:name="HTTP Unauthorized">
+			<ee:transform doc:name="Map 401 Error Response">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: correlationId,
+	errorCode: "CCAS-PROC-401",
+	message: "Unauthorized - Authentication required",
+	details: {
+		errorType: error.errorType.namespace ++ ":" ++ error.errorType.identifier,
+		description: "Authentication credentials are missing or invalid"
+	}
+}]]></ee:set-payload>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[401]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+
+		<on-error-propagate type="HTTP:FORBIDDEN" logException="true" doc:name="HTTP Forbidden">
+			<ee:transform doc:name="Map 403 Error Response">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: correlationId,
+	errorCode: "CCAS-PROC-403",
+	message: "Forbidden - Access denied",
+	details: {
+		errorType: error.errorType.namespace ++ ":" ++ error.errorType.identifier,
+		description: "You do not have permission to access this resource"
+	}
+}]]></ee:set-payload>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[403]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+
+		<!-- ============================================== -->
+		<!-- Orchestration & Composite Routing Errors      -->
+		<!-- ============================================== -->
+
+		<on-error-propagate type="MULE:COMPOSITE_ROUTING" logException="true" doc:name="Composite Routing Error">
+			<ee:transform doc:name="Map 500 Orchestration Error">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: correlationId,
+	errorCode: "CCAS-PROC-500",
+	message: "Interaction orchestration failure - Multiple downstream errors",
+	details: {
+		errorType: error.errorType.namespace ++ ":" ++ error.errorType.identifier,
+		description: "One or more downstream services failed during parallel execution"
+	}
+}]]></ee:set-payload>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[500]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+
+		<!-- ============================================== -->
+		<!-- Expression & Transformation Errors            -->
+		<!-- ============================================== -->
+
+		<on-error-propagate type="EXPRESSION" logException="true" doc:name="Expression Error">
+			<ee:transform doc:name="Map 500 Expression Error">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: correlationId,
+	errorCode: "CCAS-PROC-500",
+	message: "Internal processing error - Data transformation failure",
+	details: {
+		errorType: error.errorType.namespace ++ ":" ++ error.errorType.identifier,
+		description: "An error occurred during data transformation"
+	}
+}]]></ee:set-payload>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[500]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+
+		<!-- ============================================== -->
+		<!-- Custom Application Errors                     -->
+		<!-- ============================================== -->
+
+		<on-error-propagate type="APP:INTERACTION_NOT_FOUND" logException="true" doc:name="Interaction Not Found">
+			<ee:transform doc:name="Map 404 Interaction Not Found">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: correlationId,
+	errorCode: "CCAS-PROC-404",
+	message: "Interaction not found",
+	details: {
+		errorType: error.errorType.namespace ++ ":" ++ error.errorType.identifier,
+		description: error.description default "The specified interaction ID does not exist"
+	}
+}]]></ee:set-payload>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[404]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+
+		<on-error-propagate type="APP:COMPLIANCE_VIOLATION" logException="true" doc:name="Compliance Violation">
+			<ee:transform doc:name="Map 422 Compliance Error">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: correlationId,
+	errorCode: "CCAS-PROC-422",
+	message: "Compliance validation failed",
+	details: {
+		errorType: error.errorType.namespace ++ ":" ++ error.errorType.identifier,
+		description: error.description default "The interaction violates compliance rules"
+	}
+}]]></ee:set-payload>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[422]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+
+		<on-error-propagate type="APP:ROUTING_FAILURE" logException="true" doc:name="Routing Failure">
+			<ee:transform doc:name="Map 500 Routing Error">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: correlationId,
+	errorCode: "CCAS-PROC-500",
+	message: "Routing decision failure",
+	details: {
+		errorType: error.errorType.namespace ++ ":" ++ error.errorType.identifier,
+		description: error.description default "Unable to determine routing for the interaction"
+	}
+}]]></ee:set-payload>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[500]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+
+		<!-- ============================================== -->
+		<!-- Generic Catch-All Error Handler               -->
+		<!-- ============================================== -->
+
+		<on-error-propagate type="ANY" logException="true" doc:name="Generic Error Handler">
+			<ee:transform doc:name="Map 500 Generic Error">
+				<ee:message>
+					<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: correlationId,
+	errorCode: "CCAS-PROC-500",
+	message: "Internal Server Error",
+	details: {
+		errorType: error.errorType.namespace ++ ":" ++ error.errorType.identifier,
+		description: "An unexpected error occurred. Please contact support."
+	}
+}]]></ee:set-payload>
+				</ee:message>
+				<ee:variables>
+					<ee:set-variable variableName="httpStatus"><![CDATA[500]]></ee:set-variable>
+				</ee:variables>
+			</ee:transform>
+		</on-error-propagate>
+
+	</error-handler>
+
+</mule>

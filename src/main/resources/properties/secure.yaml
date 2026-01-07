@@ -1,0 +1,34 @@
+# CCaaS Interaction Process API - Secure Properties
+# All values must be encrypted using the secure properties tool
+# Encryption Algorithm: AES, Mode: CBC
+
+# OAuth Client Secrets for System APIs
+nice:
+  api:
+    clientId: "![encrypted-nice-client-id]"
+    clientSecret: "![encrypted-nice-client-secret]"
+
+crm:
+  api:
+    clientId: "![encrypted-crm-client-id]"
+    clientSecret: "![encrypted-crm-client-secret]"
+
+billing:
+  api:
+    clientId: "![encrypted-billing-client-id]"
+    clientSecret: "![encrypted-billing-client-secret]"
+
+wfm:
+  api:
+    clientId: "![encrypted-wfm-client-id]"
+    clientSecret: "![encrypted-wfm-client-secret]"
+
+dialer:
+  api:
+    clientId: "![encrypted-dialer-client-id]"
+    clientSecret: "![encrypted-dialer-client-secret]"
+
+recording:
+  api:
+    clientId: "![encrypted-recording-client-id]"
+    clientSecret: "![encrypted-recording-client-secret]"

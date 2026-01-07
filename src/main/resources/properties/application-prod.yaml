@@ -1,0 +1,59 @@
+# CCaaS Interaction Process API - PROD Environment Configuration
+
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8081"
+
+# System API Endpoints - PROD
+nice:
+  api:
+    host: "nice-system-api.example.com"
+    port: "443"
+    protocol: "HTTPS"
+    basePath: "/api/v1"
+
+crm:
+  api:
+    host: "crm-system-api.example.com"
+    port: "443"
+    protocol: "HTTPS"
+    basePath: "/api/v1"
+
+billing:
+  api:
+    host: "billing-system-api.example.com"
+    port: "443"
+    protocol: "HTTPS"
+    basePath: "/api/v1"
+
+wfm:
+  api:
+    host: "wfm-system-api.example.com"
+    port: "443"
+    protocol: "HTTPS"
+    basePath: "/api/v1"
+
+dialer:
+  api:
+    host: "dialer-system-api.example.com"
+    port: "443"
+    protocol: "HTTPS"
+    basePath: "/api/v1"
+
+recording:
+  api:
+    host: "recording-system-api.example.com"
+    port: "443"
+    protocol: "HTTPS"
+    basePath: "/api/v1"
+
+# Timeout Configuration - PROD (strict)
+timeout:
+  response: "30000"
+  connectionIdle: "30000"
+
+# Logging - PROD
+logging:
+  level: "INFO"
+  maskPii: "true"

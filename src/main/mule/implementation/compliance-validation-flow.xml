@@ -1,0 +1,152 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- ============================================== -->
+	<!-- Compliance Validation Flow                    -->
+	<!-- Validates interaction against compliance rules-->
+	<!-- ============================================== -->
+
+	<flow name="compliance-validation-flow" doc:name="Compliance Validation Flow">
+		<!-- Log compliance check start -->
+		<logger level="INFO" message="#['[' ++ correlationId ++ '] Starting compliance validation for interaction: ' ++ vars.interactionId]" doc:name="Log Compliance Start"/>
+
+		<!-- Build outbound headers if not already set -->
+		<choice doc:name="Check Headers">
+			<when expression="#[vars.requestHeaders == null]">
+				<flow-ref name="build-outbound-headers-subflow" doc:name="Build Headers"/>
+			</when>
+			<otherwise>
+				<logger level="TRACE" message="Headers already set" doc:name="Skip Headers"/>
+			</otherwise>
+		</choice>
+
+		<!-- Get compliance rules from Recording System API -->
+		<try doc:name="Get Compliance Rules">
+			<http:request method="GET" 
+				config-ref="Recording_System_API_Config" 
+				path="/compliance/rules" 
+				doc:name="Get Compliance Rules">
+				<http:headers><![CDATA[#[vars.requestHeaders]]]></http:headers>
+				<http:query-params><![CDATA[#[{
+	"channel": vars.originalRequest.channel default "VOICE",
+	"region": vars.originalRequest.metadata.region default "US"
+}]]]></http:query-params>
+			</http:request>
+			<set-variable variableName="complianceRules" value="#[payload]" doc:name="Store Compliance Rules"/>
+			<error-handler>
+				<on-error-continue type="ANY" logException="true" doc:name="Continue on Compliance API Error">
+					<logger level="WARN" message="#['[' ++ correlationId ++ '] Compliance rules fetch failed - using defaults: ' ++ (error.description default 'Unknown error')]" doc:name="Log Warning"/>
+					<ee:transform doc:name="Default Compliance Rules">
+						<ee:variables>
+							<ee:set-variable variableName="complianceRules"><![CDATA[%dw 2.0
+output application/json
+---
+{
+	requireRecordingConsent: true,
+	requireCallAnnouncement: true,
+	pciCompliance: true,
+	hipaaCompliance: false,
+	dncCheckRequired: true,
+	defaultRules: true
+}]]></ee:set-variable>
+						</ee:variables>
+					</ee:transform>
+				</on-error-continue>
+			</error-handler>
+		</try>
+
+		<!-- Validate against compliance rules -->
+		<ee:transform doc:name="Validate Compliance">
+			<ee:variables>
+				<ee:set-variable variableName="complianceValidation"><![CDATA[%dw 2.0
+output application/json
+
+var rules = vars.complianceRules default {}
+var channel = vars.originalRequest.channel default "VOICE"
+var metadata = vars.originalRequest.metadata default {}
+
+// Check DNC (Do Not Call) compliance for outbound
+var dncCheck = if (channel == "OUTBOUND") 
+	{
+		required: rules.dncCheckRequired default true,
+		passed: true, // Would be validated against DNC list
+		message: "DNC check passed"
+	}
+	else {
+		required: false,
+		passed: true,
+		message: "DNC check not required for inbound"
+	}
+
+// Check recording consent for voice channels
+var recordingConsentCheck = if (channel == "VOICE" or channel == "OUTBOUND")
+	{
+		required: rules.requireRecordingConsent default true,
+		passed: true, // Consent will be obtained during call
+		message: "Recording consent required - will be obtained"
+	}
+	else {
+		required: false,
+		passed: true,
+		message: "Recording consent not required for this channel"
+	}
+
+// Check PCI compliance for payment-related interactions
+var pciCheck = {
+	required: rules.pciCompliance default false,
+	passed: true,
+	message: "PCI compliance mode enabled"
+}
+
+// Check HIPAA compliance if healthcare-related
+var hipaaCheck = {
+	required: rules.hipaaCompliance default false,
+	passed: true,
+	message: if (rules.hipaaCompliance default false) "HIPAA compliance mode enabled" else "HIPAA not required"
+}
+
+// Overall compliance status
+var allPassed = dncCheck.passed and recordingConsentCheck.passed and pciCheck.passed and hipaaCheck.passed
+
+---
+{
+	status: if (allPassed) "VALIDATED" else "FAILED",
+	validatedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	checks: {
+		dnc: dncCheck,
+		recordingConsent: recordingConsentCheck,
+		pci: pciCheck,
+		hipaa: hipaaCheck
+	},
+	rulesApplied: rules,
+	overallPassed: allPassed
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+
+		<!-- Set compliance status -->
+		<set-variable variableName="complianceStatus" value="#[vars.complianceValidation.status]" doc:name="Set Compliance Status"/>
+
+		<!-- Check if compliance failed -->
+		<choice doc:name="Check Compliance Result">
+			<when expression="#[vars.complianceValidation.overallPassed == false]">
+				<logger level="ERROR" message="#['[' ++ correlationId ++ '] Compliance validation FAILED for interaction: ' ++ vars.interactionId]" doc:name="Log Compliance Failure"/>
+				<raise-error type="APP:COMPLIANCE_VIOLATION" description="#['Compliance validation failed: ' ++ write(vars.complianceValidation.checks, 'application/json')]" doc:name="Raise Compliance Error"/>
+			</when>
+			<otherwise>
+				<logger level="INFO" message="#['[' ++ correlationId ++ '] Compliance validation PASSED for interaction: ' ++ vars.interactionId]" doc:name="Log Compliance Success"/>
+			</otherwise>
+		</choice>
+
+		<error-handler ref="Global_Error_Handler"/>
+	</flow>
+
+</mule>

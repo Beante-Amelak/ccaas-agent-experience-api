@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- ============================================== -->
+	<!-- Enrich Interaction Flow                       -->
+	<!-- Applies business rules and enrichment logic  -->
+	<!-- ============================================== -->
+
+	<flow name="enrich-interaction-flow" doc:name="Enrich Interaction Flow">
+		<!-- Apply business rules based on channel and customer tier -->
+		<ee:transform doc:name="Apply Business Rules">
+			<ee:variables>
+				<ee:set-variable variableName="enrichedContext"><![CDATA[%dw 2.0
+output application/json
+
+var channel = vars.originalRequest.channel default "UNKNOWN"
+var customerTier = vars.customerContext.tier default "STANDARD"
+var accountStatus = vars.customerContext.accountStatus default "UNKNOWN"
+
+// Priority calculation based on customer tier
+var priorityScore = customerTier match {
+	case "PLATINUM" -> 100
+	case "GOLD" -> 75
+	case "SILVER" -> 50
+	case "BRONZE" -> 25
+	else -> 10
+}
+
+// Channel-specific adjustments
+var channelMultiplier = channel match {
+	case "VOICE" -> 1.2
+	case "CHAT" -> 1.0
+	case "EMAIL" -> 0.8
+	case "IVR" -> 0.9
+	case "BOT" -> 0.7
+	case "OUTBOUND" -> 1.1
+	else -> 1.0
+}
+
+// Account status adjustments
+var statusAdjustment = accountStatus match {
+	case "AT_RISK" -> 20
+	case "DELINQUENT" -> 15
+	case "VIP" -> 30
+	else -> 0
+}
+
+var finalPriority = floor((priorityScore * channelMultiplier) + statusAdjustment)
+
+// Determine skill requirements
+var requiredSkills = [
+	(if (customerTier == "PLATINUM" or customerTier == "GOLD") "PREMIUM_SUPPORT" else null),
+	(if (accountStatus == "AT_RISK") "RETENTION" else null),
+	(if (accountStatus == "DELINQUENT") "COLLECTIONS" else null),
+	(if (channel == "VOICE") "VOICE_AGENT" else null),
+	(if (channel == "CHAT") "CHAT_AGENT" else null)
+] filter $ != null
+
+---
+{
+	priority: finalPriority,
+	priorityLevel: if (finalPriority >= 80) "HIGH" 
+		else if (finalPriority >= 50) "MEDIUM" 
+		else "LOW",
+	requiredSkills: requiredSkills,
+	serviceLevel: customerTier,
+	channelType: channel,
+	accountRisk: accountStatus == "AT_RISK" or accountStatus == "DELINQUENT",
+	vipFlag: customerTier == "PLATINUM" or accountStatus == "VIP",
+	enrichedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+
+		<!-- Log enrichment decision -->
+		<set-variable variableName="businessEvent" value="INTERACTION_ENRICHED" doc:name="Set Business Event"/>
+		<set-variable variableName="eventDetails" value="#[write(vars.enrichedContext, 'application/json')]" doc:name="Set Event Details"/>
+		<flow-ref name="logging-business-event-subflow" doc:name="Log Enrichment"/>
+
+		<error-handler ref="Global_Error_Handler"/>
+	</flow>
+
+	<!-- ============================================== -->
+	<!-- Determine Routing Subflow                     -->
+	<!-- Initial routing decision logic               -->
+	<!-- ============================================== -->
+
+	<sub-flow name="determine-routing-subflow" doc:name="Determine Routing Subflow">
+		<ee:transform doc:name="Calculate Routing Decision">
+			<ee:variables>
+				<ee:set-variable variableName="routingDecision"><![CDATA[%dw 2.0
+output application/java
+
+var enrichedContext = vars.enrichedContext default {}
+var customerContext = vars.customerContext default {}
+var originalRequest = vars.originalRequest default {}
+
+// Determine primary routing based on enriched context
+var primaryRoute = if (enrichedContext.accountRisk default false) "RETENTION"
+	else if (enrichedContext.vipFlag default false) "VIP_SUPPORT"
+	else if ((enrichedContext.requiredSkills default []) contains "COLLECTIONS") "COLLECTIONS"
+	else originalRequest.channel match {
+		case "OUTBOUND" -> "OUTBOUND_SALES"
+		case "IVR" -> "IVR_ROUTING"
+		case "BOT" -> "BOT_ESCALATION"
+		else -> "GENERAL_SUPPORT"
+	}
+
+---
+primaryRoute]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+
+		<logger level="INFO" message="#['[' ++ correlationId ++ '] Routing decision: ' ++ vars.routingDecision ++ ' for interaction: ' ++ vars.interactionId]" doc:name="Log Routing Decision"/>
+	</sub-flow>
+
+</mule>

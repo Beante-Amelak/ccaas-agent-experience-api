@@ -1,0 +1,288 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- ============================================== -->
+	<!-- Aggregate Customer Context Flow               -->
+	<!-- Parallel lookup to multiple system APIs       -->
+	<!-- ============================================== -->
+
+	<flow name="aggregate-customer-context-flow" doc:name="Aggregate Customer Context Flow">
+		<!-- Log context aggregation start -->
+		<logger level="INFO" message="#['[' ++ correlationId ++ '] Starting customer context aggregation for customerId: ' ++ (vars.originalRequest.customerId default 'N/A')]" doc:name="Log Aggregation Start"/>
+
+		<!-- Parallel lookup to CRM, Billing, and WFM systems -->
+		<scatter-gather doc:name="Parallel Context Lookup">
+			<!-- Route 1: CRM System API -->
+			<route>
+				<try doc:name="Get CRM Customer Data">
+					<choice doc:name="Check Customer ID">
+						<when expression="#[!isEmpty(vars.originalRequest.customerId)]">
+							<http:request method="GET" 
+								config-ref="CRM_System_API_Config" 
+								path="/customers/{customerId}" 
+								doc:name="Get Customer from CRM">
+								<http:headers><![CDATA[#[vars.requestHeaders]]]></http:headers>
+								<http:uri-params><![CDATA[#[{"customerId": vars.originalRequest.customerId}]]]></http:uri-params>
+							</http:request>
+						</when>
+						<otherwise>
+							<!-- Try phone lookup if no customer ID -->
+							<choice doc:name="Check Phone Number">
+								<when expression="#[!isEmpty(vars.originalRequest.phoneNumber)]">
+									<http:request method="GET" 
+										config-ref="CRM_System_API_Config" 
+										path="/customers" 
+										doc:name="Search Customer by Phone">
+										<http:headers><![CDATA[#[vars.requestHeaders]]]></http:headers>
+										<http:query-params><![CDATA[#[{"phone": vars.originalRequest.phoneNumber}]]]></http:query-params>
+									</http:request>
+								</when>
+								<otherwise>
+									<ee:transform doc:name="No Customer Data">
+										<ee:message>
+											<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	source: "CRM",
+	found: false,
+	data: null
+}]]></ee:set-payload>
+										</ee:message>
+									</ee:transform>
+								</otherwise>
+							</choice>
+						</otherwise>
+					</choice>
+					<ee:transform doc:name="Normalize CRM Response">
+						<ee:message>
+							<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	source: "CRM",
+	found: true,
+	data: payload
+}]]></ee:set-payload>
+						</ee:message>
+					</ee:transform>
+					<error-handler>
+						<on-error-continue type="ANY" logException="true" doc:name="Continue on CRM Error">
+							<ee:transform doc:name="CRM Error Response">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	source: "CRM",
+	found: false,
+	error: true,
+	errorMessage: error.description default "CRM unavailable",
+	data: null
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</route>
+
+			<!-- Route 2: Billing System API -->
+			<route>
+				<try doc:name="Get Billing Account Data">
+					<choice doc:name="Check Customer ID for Billing">
+						<when expression="#[!isEmpty(vars.originalRequest.customerId)]">
+							<http:request method="GET" 
+								config-ref="Billing_System_API_Config" 
+								path="/accounts" 
+								doc:name="Get Account from Billing">
+								<http:headers><![CDATA[#[vars.requestHeaders]]]></http:headers>
+								<http:query-params><![CDATA[#[{"customerId": vars.originalRequest.customerId}]]]></http:query-params>
+							</http:request>
+							<ee:transform doc:name="Normalize Billing Response">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	source: "BILLING",
+	found: true,
+	data: payload
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</when>
+						<otherwise>
+							<ee:transform doc:name="No Billing Data">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	source: "BILLING",
+	found: false,
+	data: null
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</otherwise>
+					</choice>
+					<error-handler>
+						<on-error-continue type="ANY" logException="true" doc:name="Continue on Billing Error">
+							<ee:transform doc:name="Billing Error Response">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	source: "BILLING",
+	found: false,
+	error: true,
+	errorMessage: error.description default "Billing unavailable",
+	data: null
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</route>
+
+			<!-- Route 3: WFM System API for agent/queue info -->
+			<route>
+				<try doc:name="Get WFM Agent Data">
+					<choice doc:name="Check Agent ID">
+						<when expression="#[!isEmpty(vars.originalRequest.agentId)]">
+							<http:request method="GET" 
+								config-ref="WFM_System_API_Config" 
+								path="/agents/{agentId}" 
+								doc:name="Get Agent from WFM">
+								<http:headers><![CDATA[#[vars.requestHeaders]]]></http:headers>
+								<http:uri-params><![CDATA[#[{"agentId": vars.originalRequest.agentId}]]]></http:uri-params>
+							</http:request>
+							<ee:transform doc:name="Normalize WFM Response">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	source: "WFM",
+	found: true,
+	data: payload
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</when>
+						<otherwise>
+							<ee:transform doc:name="No WFM Data">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	source: "WFM",
+	found: false,
+	data: null
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</otherwise>
+					</choice>
+					<error-handler>
+						<on-error-continue type="ANY" logException="true" doc:name="Continue on WFM Error">
+							<ee:transform doc:name="WFM Error Response">
+								<ee:message>
+									<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	source: "WFM",
+	found: false,
+	error: true,
+	errorMessage: error.description default "WFM unavailable",
+	data: null
+}]]></ee:set-payload>
+								</ee:message>
+							</ee:transform>
+						</on-error-continue>
+					</error-handler>
+				</try>
+			</route>
+		</scatter-gather>
+
+		<!-- Aggregate and normalize customer context -->
+		<ee:transform doc:name="Aggregate Customer Context">
+			<ee:variables>
+				<ee:set-variable variableName="customerContext"><![CDATA[%dw 2.0
+output application/json
+
+var crmData = payload."0".payload
+var billingData = payload."1".payload
+var wfmData = payload."2".payload
+
+// Extract customer info from CRM
+var customerInfo = if (crmData.found default false) crmData.data else {}
+
+// Extract account info from Billing
+var accountInfo = if (billingData.found default false) billingData.data else {}
+
+// Extract agent/queue info from WFM
+var wfmInfo = if (wfmData.found default false) wfmData.data else {}
+
+// Determine customer tier
+var tier = customerInfo.tier default accountInfo.tier default "STANDARD"
+
+// Determine account status
+var accountStatus = accountInfo.status default customerInfo.accountStatus default "ACTIVE"
+
+---
+{
+	// Customer identification
+	customerId: customerInfo.customerId default vars.originalRequest.customerId,
+	name: customerInfo.name default customerInfo.firstName ++ " " ++ customerInfo.lastName default "Unknown",
+	email: customerInfo.email,
+	phone: customerInfo.phone default vars.originalRequest.phoneNumber,
+	
+	// Account information
+	accountId: accountInfo.accountId,
+	accountStatus: accountStatus,
+	tier: tier,
+	balance: accountInfo.balance,
+	lastPaymentDate: accountInfo.lastPaymentDate,
+	
+	// Interaction history
+	lastInteractionDate: customerInfo.lastInteractionDate,
+	interactionCount: customerInfo.interactionCount default 0,
+	
+	// Agent/Queue context
+	preferredAgent: wfmInfo.preferredAgent,
+	lastAgent: customerInfo.lastAgentId,
+	
+	// Data source tracking
+	dataSources: {
+		crm: crmData.found default false,
+		billing: billingData.found default false,
+		wfm: wfmData.found default false
+	},
+	
+	// Aggregation metadata
+	aggregatedAt: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-variable>
+			</ee:variables>
+		</ee:transform>
+
+		<!-- Log aggregation completion -->
+		<logger level="INFO" message="#['[' ++ correlationId ++ '] Customer context aggregation complete - Sources: CRM=' ++ (vars.customerContext.dataSources.crm default false) ++ ', Billing=' ++ (vars.customerContext.dataSources.billing default false) ++ ', WFM=' ++ (vars.customerContext.dataSources.wfm default false)]" doc:name="Log Aggregation Complete"/>
+
+		<error-handler ref="Global_Error_Handler"/>
+	</flow>
+
+</mule>

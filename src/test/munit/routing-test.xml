@@ -1,0 +1,268 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xmlns:munit="http://www.mulesoft.org/schema/mule/munit"
+	xmlns:munit-tools="http://www.mulesoft.org/schema/mule/munit-tools"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/munit http://www.mulesoft.org/schema/mule/munit/current/mule-munit.xsd
+		http://www.mulesoft.org/schema/mule/munit-tools http://www.mulesoft.org/schema/mule/munit-tools/current/mule-munit-tools.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- MUnit Configuration -->
+	<munit:config name="routing-test.xml"/>
+
+	<!-- ============================================== -->
+	<!-- Test: Determine Routing - Success             -->
+	<!-- ============================================== -->
+
+	<munit:test name="test-determine-routing-success" description="Test successful routing determination">
+		<munit:behavior>
+			<!-- Mock Object Store Contains -->
+			<munit-tools:mock-when processor="os:contains" doc:name="Mock OS Contains">
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[true]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<!-- Mock Object Store Retrieve -->
+			<munit-tools:mock-when processor="os:retrieve" doc:name="Mock OS Retrieve">
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- {
+						interactionId: 'INT-TEST001',
+						channel: 'VOICE',
+						routingDecision: 'SALES',
+						status: 'ACTIVE'
+					}]" mediaType="application/json"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<!-- Mock Object Store Store -->
+			<munit-tools:mock-when processor="os:store" doc:name="Mock OS Store">
+				<munit-tools:then-return/>
+			</munit-tools:mock-when>
+
+			<!-- Mock WFM System API -->
+			<munit-tools:mock-when processor="http:request" doc:name="Mock WFM API">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute whereValue="WFM_System_API_Config" attributeName="config-ref"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- {
+						queues: [
+							{queueId: 'Q-SALES-001', available: true, waitTime: 60}
+						]
+					}]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{statusCode: 200}]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<!-- Mock Dialer System API -->
+			<munit-tools:mock-when processor="http:request" doc:name="Mock Dialer API">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute whereValue="Dialer_System_API_Config" attributeName="config-ref"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- {
+						campaigns: []
+					}]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{statusCode: 200}]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<!-- Mock NICE System API -->
+			<munit-tools:mock-when processor="http:request" doc:name="Mock NICE API">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute whereValue="NICE_System_API_Config" attributeName="config-ref"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- {status: 'ROUTED'}]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{statusCode: 200}]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+
+		<munit:execution>
+			<set-variable variableName="interactionId" value="INT-TEST001" doc:name="Set Interaction ID"/>
+			<set-payload value="#[output application/json --- {
+				skillRequired: 'SALES',
+				priority: 75,
+				routingHints: {
+					language: 'en-US',
+					region: 'WEST'
+				}
+			}]" doc:name="Set Request Payload"/>
+			<flow-ref name="post:\interactions\(interactionId)\route:ccaas-interaction-process-api-config" doc:name="Call Route Interaction"/>
+		</munit:execution>
+
+		<munit:validation>
+			<munit-tools:assert-equals actual="#[payload.status]" expected="#['ACCEPTED']" doc:name="Assert Status ACCEPTED"/>
+			<munit-tools:assert-that expression="#[payload.routingDecision]" is="#[MunitTools::notNullValue()]" doc:name="Assert Routing Decision exists"/>
+			<munit-tools:assert-that expression="#[payload.targetQueue]" is="#[MunitTools::notNullValue()]" doc:name="Assert Target Queue exists"/>
+			<munit-tools:assert-equals actual="#[vars.httpStatus]" expected="#[202]" doc:name="Assert HTTP 202 Status"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- ============================================== -->
+	<!-- Test: Determine Routing - Interaction Not Found -->
+	<!-- ============================================== -->
+
+	<munit:test name="test-determine-routing-not-found" description="Test routing with invalid interaction ID" expectedErrorType="APP:INTERACTION_NOT_FOUND">
+		<munit:behavior>
+			<!-- Mock Object Store Contains - Returns false -->
+			<munit-tools:mock-when processor="os:contains" doc:name="Mock OS Contains False">
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[false]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+
+		<munit:execution>
+			<set-variable variableName="interactionId" value="INT-INVALID" doc:name="Set Invalid Interaction ID"/>
+			<set-payload value="#[output application/json --- {
+				skillRequired: 'SALES'
+			}]" doc:name="Set Request Payload"/>
+			<flow-ref name="post:\interactions\(interactionId)\route:ccaas-interaction-process-api-config" doc:name="Call Route Interaction"/>
+		</munit:execution>
+	</munit:test>
+
+	<!-- ============================================== -->
+	<!-- Test: Routing with WFM Timeout                -->
+	<!-- ============================================== -->
+
+	<munit:test name="test-routing-wfm-timeout" description="Test routing continues when WFM times out">
+		<munit:behavior>
+			<!-- Mock Object Store Contains -->
+			<munit-tools:mock-when processor="os:contains" doc:name="Mock OS Contains">
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[true]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<!-- Mock Object Store Retrieve -->
+			<munit-tools:mock-when processor="os:retrieve" doc:name="Mock OS Retrieve">
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- {
+						interactionId: 'INT-TEST002',
+						channel: 'CHAT',
+						routingDecision: 'SUPPORT',
+						status: 'ACTIVE'
+					}]" mediaType="application/json"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<!-- Mock Object Store Store -->
+			<munit-tools:mock-when processor="os:store" doc:name="Mock OS Store">
+				<munit-tools:then-return/>
+			</munit-tools:mock-when>
+
+			<!-- Mock WFM System API - Timeout -->
+			<munit-tools:mock-when processor="http:request" doc:name="Mock WFM Timeout">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute whereValue="WFM_System_API_Config" attributeName="config-ref"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:error typeId="HTTP:TIMEOUT"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<!-- Mock Dialer System API -->
+			<munit-tools:mock-when processor="http:request" doc:name="Mock Dialer API">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute whereValue="Dialer_System_API_Config" attributeName="config-ref"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- {campaigns: []}]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{statusCode: 200}]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<!-- Mock NICE System API -->
+			<munit-tools:mock-when processor="http:request" doc:name="Mock NICE API">
+				<munit-tools:with-attributes>
+					<munit-tools:with-attribute whereValue="NICE_System_API_Config" attributeName="config-ref"/>
+				</munit-tools:with-attributes>
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- {status: 'ROUTED'}]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{statusCode: 200}]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+
+		<munit:execution>
+			<set-variable variableName="interactionId" value="INT-TEST002" doc:name="Set Interaction ID"/>
+			<set-payload value="#[output application/json --- {
+				skillRequired: 'SUPPORT'
+			}]" doc:name="Set Request Payload"/>
+			<flow-ref name="post:\interactions\(interactionId)\route:ccaas-interaction-process-api-config" doc:name="Call Route Interaction"/>
+		</munit:execution>
+
+		<munit:validation>
+			<!-- Should still succeed with default routing -->
+			<munit-tools:assert-equals actual="#[payload.status]" expected="#['ACCEPTED']" doc:name="Assert Status ACCEPTED"/>
+			<munit-tools:assert-equals actual="#[vars.httpStatus]" expected="#[202]" doc:name="Assert HTTP 202 Status"/>
+		</munit:validation>
+	</munit:test>
+
+	<!-- ============================================== -->
+	<!-- Test: VIP Customer Routing                    -->
+	<!-- ============================================== -->
+
+	<munit:test name="test-vip-customer-routing" description="Test VIP customer gets priority routing">
+		<munit:behavior>
+			<!-- Mock Object Store Contains -->
+			<munit-tools:mock-when processor="os:contains" doc:name="Mock OS Contains">
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[true]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<!-- Mock Object Store Retrieve - VIP Customer -->
+			<munit-tools:mock-when processor="os:retrieve" doc:name="Mock OS Retrieve VIP">
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- {
+						interactionId: 'INT-VIP001',
+						channel: 'VOICE',
+						routingDecision: 'VIP_SUPPORT',
+						status: 'ACTIVE',
+						customerContext: {
+							tier: 'PLATINUM',
+							accountStatus: 'VIP'
+						}
+					}]" mediaType="application/json"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+
+			<!-- Mock Object Store Store -->
+			<munit-tools:mock-when processor="os:store" doc:name="Mock OS Store">
+				<munit-tools:then-return/>
+			</munit-tools:mock-when>
+
+			<!-- Mock all HTTP requests -->
+			<munit-tools:mock-when processor="http:request" doc:name="Mock All HTTP">
+				<munit-tools:then-return>
+					<munit-tools:payload value="#[output application/json --- {status: 'SUCCESS'}]" mediaType="application/json"/>
+					<munit-tools:attributes value="#[{statusCode: 200}]"/>
+				</munit-tools:then-return>
+			</munit-tools:mock-when>
+		</munit:behavior>
+
+		<munit:execution>
+			<set-variable variableName="interactionId" value="INT-VIP001" doc:name="Set Interaction ID"/>
+			<set-payload value="#[output application/json --- {
+				priority: 100
+			}]" doc:name="Set Request Payload"/>
+			<flow-ref name="post:\interactions\(interactionId)\route:ccaas-interaction-process-api-config" doc:name="Call Route Interaction"/>
+		</munit:execution>
+
+		<munit:validation>
+			<munit-tools:assert-equals actual="#[payload.status]" expected="#['ACCEPTED']" doc:name="Assert Status ACCEPTED"/>
+			<munit-tools:assert-that expression="#[payload.targetQueue contains 'VIP']" is="#[MunitTools::equalTo(true)]" doc:name="Assert VIP Queue"/>
+		</munit:validation>
+	</munit:test>
+
+</mule>

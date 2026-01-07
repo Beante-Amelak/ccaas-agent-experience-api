@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- ============================================== -->
+	<!-- Logging Subflows                              -->
+	<!-- Centralized logging with PII masking          -->
+	<!-- ============================================== -->
+
+	<!-- Entry Logging Subflow -->
+	<sub-flow name="logging-entry-subflow" doc:name="Logging Entry Subflow">
+		<logger level="INFO" 
+			message="#['[' ++ correlationId ++ '] ENTRY - Method: ' ++ (attributes.method default 'N/A') ++ ', Path: ' ++ (attributes.requestPath default 'N/A') ++ ', RemoteAddress: ' ++ (attributes.remoteAddress default 'N/A')]" 
+			doc:name="Log Entry"/>
+	</sub-flow>
+
+	<!-- Exit Logging Subflow -->
+	<sub-flow name="logging-exit-subflow" doc:name="Logging Exit Subflow">
+		<logger level="INFO" 
+			message="#['[' ++ correlationId ++ '] EXIT - Status: ' ++ (vars.httpStatus default 200) ++ ', Path: ' ++ (attributes.requestPath default 'N/A')]" 
+			doc:name="Log Exit"/>
+	</sub-flow>
+
+	<!-- Business Event Logging Subflow -->
+	<sub-flow name="logging-business-event-subflow" doc:name="Business Event Logging Subflow">
+		<logger level="INFO" 
+			message="#['[' ++ correlationId ++ '] BUSINESS_EVENT - Event: ' ++ (vars.businessEvent default 'UNKNOWN') ++ ', InteractionId: ' ++ (vars.interactionId default 'N/A') ++ ', Details: ' ++ (vars.eventDetails default '{}')]" 
+			doc:name="Log Business Event"/>
+	</sub-flow>
+
+	<!-- Error Logging Subflow -->
+	<sub-flow name="logging-error-subflow" doc:name="Error Logging Subflow">
+		<logger level="ERROR" 
+			message="#['[' ++ correlationId ++ '] ERROR - Type: ' ++ (error.errorType.namespace default 'UNKNOWN') ++ ':' ++ (error.errorType.identifier default 'UNKNOWN') ++ ', Description: ' ++ (error.description default 'No description')]" 
+			doc:name="Log Error"/>
+	</sub-flow>
+
+	<!-- Debug Logging Subflow (for non-production) -->
+	<sub-flow name="logging-debug-subflow" doc:name="Debug Logging Subflow">
+		<choice doc:name="Check Logging Level">
+			<when expression="#[p('logging.level') == 'DEBUG']">
+				<logger level="DEBUG" 
+					message="#['[' ++ correlationId ++ '] DEBUG - ' ++ (vars.debugMessage default 'No message')]" 
+					doc:name="Log Debug"/>
+			</when>
+			<otherwise>
+				<logger level="TRACE" message="Debug logging disabled" doc:name="Skip Debug"/>
+			</otherwise>
+		</choice>
+	</sub-flow>
+
+	<!-- PII Masking Utility Subflow -->
+	<sub-flow name="mask-pii-subflow" doc:name="Mask PII Subflow">
+		<ee:transform doc:name="Mask Sensitive Data">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+
+fun maskValue(value: String, visibleChars: Number = 4): String =
+	if (sizeOf(value) <= visibleChars) "****"
+	else ("*" * (sizeOf(value) - visibleChars)) ++ value[-visibleChars to -1]
+
+fun maskPhone(phone: String): String =
+	if (isEmpty(phone)) "N/A"
+	else "***-***-" ++ phone[-4 to -1]
+
+fun maskEmail(email: String): String =
+	if (isEmpty(email)) "N/A"
+	else do {
+		var parts = email splitBy "@"
+		---
+		if (sizeOf(parts) == 2) 
+			(parts[0][0 to 1] default "**") ++ "***@" ++ (parts[1] default "***")
+		else "***@***"
+	}
+---
+payload mapObject ((value, key) ->
+	if (lower(key as String) contains "phone") (key): maskPhone(value default "")
+	else if (lower(key as String) contains "email") (key): maskEmail(value default "")
+	else if (lower(key as String) contains "ssn") (key): "***-**-" ++ ((value default "")[-4 to -1] default "****")
+	else if (lower(key as String) contains "password" or lower(key as String) contains "secret") (key): "********"
+	else (key): value
+)]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</sub-flow>
+
+</mule>

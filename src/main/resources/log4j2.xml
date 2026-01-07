@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Configuration>
+
+    <!-- CCaaS Interaction Process API - Log4j2 Configuration -->
+
+    <Appenders>
+        <!-- Rolling File Appender for Application Logs -->
+        <RollingFile name="file" 
+            fileName="${sys:mule.home}${sys:file.separator}logs${sys:file.separator}ccaas-interaction-process-api.log"
+            filePattern="${sys:mule.home}${sys:file.separator}logs${sys:file.separator}ccaas-interaction-process-api-%d{yyyy-MM-dd}-%i.log">
+            <PatternLayout pattern="%-5p %d{yyyy-MM-dd HH:mm:ss.SSS} [%t] [correlationId: %X{correlationId}] [processor: %X{processorPath}] %c: %m%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="50 MB"/>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+            </Policies>
+            <DefaultRolloverStrategy max="30"/>
+        </RollingFile>
+
+        <!-- Console Appender -->
+        <Console name="Console" target="SYSTEM_OUT">
+            <PatternLayout pattern="%-5p %d{yyyy-MM-dd HH:mm:ss.SSS} [%t] [correlationId: %X{correlationId}] %c: %m%n"/>
+        </Console>
+
+        <!-- Audit Log Appender for Business Events -->
+        <RollingFile name="auditLog" 
+            fileName="${sys:mule.home}${sys:file.separator}logs${sys:file.separator}ccaas-audit.log"
+            filePattern="${sys:mule.home}${sys:file.separator}logs${sys:file.separator}ccaas-audit-%d{yyyy-MM-dd}-%i.log">
+            <PatternLayout pattern="%d{yyyy-MM-dd HH:mm:ss.SSS} [correlationId: %X{correlationId}] %m%n"/>
+            <Policies>
+                <SizeBasedTriggeringPolicy size="100 MB"/>
+                <TimeBasedTriggeringPolicy interval="1" modulate="true"/>
+            </Policies>
+            <DefaultRolloverStrategy max="90"/>
+        </RollingFile>
+    </Appenders>
+
+    <Loggers>
+        <!-- HTTP Logger - Wire traffic on DEBUG -->
+        <AsyncLogger name="org.mule.service.http.impl.service.HttpMessageLogger" level="WARN"/>
+        <AsyncLogger name="org.mule.service.http" level="WARN"/>
+        <AsyncLogger name="org.mule.extension.http" level="WARN"/>
+
+        <!-- Mule Core Logger -->
+        <AsyncLogger name="org.mule.runtime.core.internal.processor.LoggerMessageProcessor" level="INFO"/>
+
+        <!-- Application Logger -->
+        <AsyncLogger name="com.mycompany.ccaas" level="INFO"/>
+
+        <!-- APIKit Logger -->
+        <AsyncLogger name="org.mule.module.apikit" level="WARN"/>
+
+        <!-- Object Store Logger -->
+        <AsyncLogger name="org.mule.extension.objectstore" level="WARN"/>
+
+        <!-- Audit Logger for Business Events -->
+        <AsyncLogger name="audit" level="INFO" additivity="false">
+            <AppenderRef ref="auditLog"/>
+        </AsyncLogger>
+
+        <!-- Root Logger -->
+        <AsyncRoot level="INFO">
+            <AppenderRef ref="file"/>
+            <AppenderRef ref="Console"/>
+        </AsyncRoot>
+    </Loggers>
+
+</Configuration>

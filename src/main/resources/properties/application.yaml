@@ -1,0 +1,39 @@
+# CCaaS Interaction Process API - Common Configuration
+# Environment-agnostic settings
+
+api:
+  name: "ccaas-interaction-process-api"
+  version: "v1"
+  basePath: "/api/v1"
+
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8081"
+    basePath: "/api/v1"
+
+# System API Base Paths
+systemApi:
+  basePath: "/api/v1"
+
+# Retry Configuration
+retry:
+  maxAttempts: "3"
+  intervalMs: "2000"
+
+# Timeout Configuration (milliseconds)
+timeout:
+  response: "30000"
+  connectionIdle: "30000"
+
+# Object Store Configuration
+objectStore:
+  interactionContext:
+    maxEntries: "10000"
+    entryTtlHours: "24"
+    expirationIntervalMinutes: "30"
+
+# Logging Configuration
+logging:
+  level: "INFO"
+  maskPii: "true"

@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- ============================================== -->
+	<!-- Response Mapper Subflows                      -->
+	<!-- Standardized response formatting              -->
+	<!-- ============================================== -->
+
+	<!-- Success Response Mapper -->
+	<sub-flow name="map-success-response-subflow" doc:name="Map Success Response Subflow">
+		<ee:transform doc:name="Build Success Response">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	status: "SUCCESS",
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: vars.correlationId default correlationId,
+	data: vars.responseData default payload
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</sub-flow>
+
+	<!-- Accepted Response Mapper (for async operations) -->
+	<sub-flow name="map-accepted-response-subflow" doc:name="Map Accepted Response Subflow">
+		<ee:transform doc:name="Build Accepted Response">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	status: "ACCEPTED",
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"},
+	correlationId: vars.correlationId default correlationId,
+	processingId: vars.processingId default uuid(),
+	message: vars.acceptedMessage default "Request accepted for processing"
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</sub-flow>
+
+	<!-- Interaction Start Response Mapper -->
+	<sub-flow name="map-interaction-start-response-subflow" doc:name="Map Interaction Start Response Subflow">
+		<ee:transform doc:name="Build Interaction Start Response">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	interactionId: vars.interactionId,
+	routingDecision: vars.routingDecision default "DEFAULT",
+	customerContext: vars.customerContext default {},
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</sub-flow>
+
+	<!-- Route Response Mapper -->
+	<sub-flow name="map-route-response-subflow" doc:name="Map Route Response Subflow">
+		<ee:transform doc:name="Build Route Response">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	status: "ACCEPTED",
+	routingDecision: vars.routingDecision default "DEFAULT_QUEUE",
+	targetQueue: vars.targetQueue default null,
+	estimatedWaitTime: vars.estimatedWaitTime default null
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</sub-flow>
+
+	<!-- Complete Response Mapper -->
+	<sub-flow name="map-complete-response-subflow" doc:name="Map Complete Response Subflow">
+		<ee:transform doc:name="Build Complete Response">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	status: "ACCEPTED",
+	postCallProcessingId: vars.postCallProcessingId default null
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</sub-flow>
+
+	<!-- System API Response Normalizer -->
+	<sub-flow name="normalize-system-api-response-subflow" doc:name="Normalize System API Response Subflow">
+		<ee:transform doc:name="Normalize Response">
+			<ee:message>
+				<ee:set-payload><![CDATA[%dw 2.0
+output application/json
+---
+{
+	success: (attributes.statusCode default 500) < 400,
+	statusCode: attributes.statusCode default 500,
+	data: payload,
+	timestamp: now() as String {format: "yyyy-MM-dd'T'HH:mm:ss'Z'"}
+}]]></ee:set-payload>
+			</ee:message>
+		</ee:transform>
+	</sub-flow>
+
+</mule>

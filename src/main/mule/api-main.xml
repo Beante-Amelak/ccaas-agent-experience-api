@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mule xmlns="http://www.mulesoft.org/schema/mule/core"
+	xmlns:doc="http://www.mulesoft.org/schema/mule/documentation"
+	xmlns:http="http://www.mulesoft.org/schema/mule/http"
+	xmlns:apikit="http://www.mulesoft.org/schema/mule/mule-apikit"
+	xmlns:ee="http://www.mulesoft.org/schema/mule/ee/core"
+	xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:schemaLocation="
+		http://www.mulesoft.org/schema/mule/core http://www.mulesoft.org/schema/mule/core/current/mule.xsd
+		http://www.mulesoft.org/schema/mule/http http://www.mulesoft.org/schema/mule/http/current/mule-http.xsd
+		http://www.mulesoft.org/schema/mule/mule-apikit http://www.mulesoft.org/schema/mule/mule-apikit/current/mule-apikit.xsd
+		http://www.mulesoft.org/schema/mule/ee/core http://www.mulesoft.org/schema/mule/ee/core/current/mule-ee.xsd">
+
+	<!-- ============================================== -->
+	<!-- Main API Flow - Entry Point                   -->
+	<!-- ============================================== -->
+
+	<flow name="ccaas-interaction-process-api-main" doc:name="API Main Flow">
+		<http:listener config-ref="HTTP_Listener_Config" path="/*" doc:name="HTTP Listener">
+			<http:response statusCode="#[vars.httpStatus default 200]">
+				<http:headers><![CDATA[#[vars.outboundHeaders default {}]]]></http:headers>
+			</http:response>
+			<http:error-response statusCode="#[vars.httpStatus default 500]">
+				<http:body><![CDATA[#[payload]]]></http:body>
+				<http:headers><![CDATA[#[vars.outboundHeaders default {}]]]></http:headers>
+			</http:error-response>
+		</http:listener>
+
+		<!-- Initialize Correlation ID -->
+		<flow-ref name="correlation-id-subflow" doc:name="Initialize Correlation ID"/>
+
+		<!-- Entry Logging -->
+		<flow-ref name="logging-entry-subflow" doc:name="Log Entry"/>
+
+		<!-- APIKit Router -->
+		<apikit:router config-ref="ccaas-interaction-process-api-config" doc:name="APIKit Router"/>
+
+		<!-- Exit Logging -->
+		<flow-ref name="logging-exit-subflow" doc:name="Log Exit"/>
+
+		<error-handler ref="Global_Error_Handler"/>
+	</flow>
+
+	<!-- ============================================== -->
+	<!-- API Console Flow                              -->
+	<!-- ============================================== -->
+
+	<!-- ============================================== -->
+	<!-- POST /interactions/start                      -->
+	<!-- Start a customer interaction                  -->
+	<!-- ============================================== -->
+
+	<flow name="post:\interactions\start:ccaas-interaction-process-api-config" doc:name="POST /interactions/start">
+		<!-- Log business operation -->
+		<logger level="INFO" message="Starting new interaction - Channel: #[payload.channel default 'UNKNOWN'], CustomerId: #[payload.customerId default 'N/A']" doc:name="Log Start Interaction"/>
+
+		<!-- Delegate to implementation flow -->
+		<flow-ref name="start-interaction-flow" doc:name="Start Interaction Implementation"/>
+
+		<!-- Set HTTP Status for successful creation -->
+		<set-variable variableName="httpStatus" value="#[201]" doc:name="Set HTTP 201"/>
+	</flow>
+
+	<!-- ============================================== -->
+	<!-- POST /interactions/{interactionId}/route      -->
+	<!-- Determine and publish routing decision        -->
+	<!-- ============================================== -->
+
+	<flow name="post:\interactions\(interactionId)\route:ccaas-interaction-process-api-config" doc:name="POST /interactions/{interactionId}/route">
+		<!-- Extract interaction ID from URI params -->
+		<set-variable variableName="interactionId" value="#[attributes.uriParams.interactionId]" doc:name="Set Interaction ID"/>
+
+		<!-- Log business operation -->
+		<logger level="INFO" message="Routing interaction - InteractionId: #[vars.interactionId]" doc:name="Log Route Interaction"/>
+
+		<!-- Delegate to implementation flow -->
+		<flow-ref name="determine-routing-flow" doc:name="Determine Routing Implementation"/>
+
+		<!-- Set HTTP Status for accepted -->
+		<set-variable variableName="httpStatus" value="#[202]" doc:name="Set HTTP 202"/>
+	</flow>
+
+	<!-- ============================================== -->
+	<!-- POST /interactions/{interactionId}/complete   -->
+	<!-- Close interaction and trigger post-call       -->
+	<!-- ============================================== -->
+
+	<flow name="post:\interactions\(interactionId)\complete:ccaas-interaction-process-api-config" doc:name="POST /interactions/{interactionId}/complete">
+		<!-- Extract interaction ID from URI params -->
+		<set-variable variableName="interactionId" value="#[attributes.uriParams.interactionId]" doc:name="Set Interaction ID"/>
+
+		<!-- Log business operation -->
+		<logger level="INFO" message="Completing interaction - InteractionId: #[vars.interactionId], Disposition: #[payload.disposition default 'UNKNOWN']" doc:name="Log Complete Interaction"/>
+
+		<!-- Delegate to implementation flow -->
+		<flow-ref name="close-interaction-flow" doc:name="Close Interaction Implementation"/>
+
+		<!-- Set HTTP Status for accepted -->
+		<set-variable variableName="httpStatus" value="#[202]" doc:name="Set HTTP 202"/>
+	</flow>
+
+</mule>

@@ -1,0 +1,59 @@
+# CCaaS Interaction Process API - DEV Environment Configuration
+
+http:
+  listener:
+    host: "0.0.0.0"
+    port: "8081"
+
+# System API Endpoints - DEV
+nice:
+  api:
+    host: "nice-system-api-dev.example.com"
+    port: "443"
+    protocol: "HTTPS"
+    basePath: "/api/v1"
+
+crm:
+  api:
+    host: "crm-system-api-dev.example.com"
+    port: "443"
+    protocol: "HTTPS"
+    basePath: "/api/v1"
+
+billing:
+  api:
+    host: "billing-system-api-dev.example.com"
+    port: "443"
+    protocol: "HTTPS"
+    basePath: "/api/v1"
+
+wfm:
+  api:
+    host: "wfm-system-api-dev.example.com"
+    port: "443"
+    protocol: "HTTPS"
+    basePath: "/api/v1"
+
+dialer:
+  api:
+    host: "dialer-system-api-dev.example.com"
+    port: "443"
+    protocol: "HTTPS"
+    basePath: "/api/v1"
+
+recording:
+  api:
+    host: "recording-system-api-dev.example.com"
+    port: "443"
+    protocol: "HTTPS"
+    basePath: "/api/v1"
+
+# Timeout Configuration - DEV (more lenient)
+timeout:
+  response: "60000"
+  connectionIdle: "60000"
+
+# Logging - DEV
+logging:
+  level: "DEBUG"
+  maskPii: "false"
